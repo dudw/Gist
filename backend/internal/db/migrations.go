@@ -335,6 +335,64 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	// Migration 19: Article rules.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS article_rules (
+			id INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			full_word INTEGER NOT NULL DEFAULT 0,
+			action_type TEXT NOT NULL DEFAULT 'mark_read',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`); err != nil {
+		return fmt.Errorf("create article_rules table: %w", err)
+	}
+
+	// Migration 20: Conditions belonging to an article rule.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS article_rule_conditions (
+			id INTEGER PRIMARY KEY,
+			rule_id INTEGER NOT NULL,
+			position INTEGER NOT NULL,
+			join_type TEXT NOT NULL DEFAULT 'and',
+			field TEXT NOT NULL,
+			operator TEXT NOT NULL,
+			value TEXT NOT NULL,
+			FOREIGN KEY (rule_id) REFERENCES article_rules(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("create article_rule_conditions table: %w", err)
+	}
+
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_article_rule_conditions_rule
+			ON article_rule_conditions(rule_id, position)
+	`); err != nil {
+		return fmt.Errorf("create idx_article_rule_conditions_rule: %w", err)
+	}
+
+	// Migration 21: Feed bindings for article rules.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS article_rule_feeds (
+			rule_id INTEGER NOT NULL,
+			feed_id INTEGER NOT NULL,
+			PRIMARY KEY (rule_id, feed_id),
+			FOREIGN KEY (rule_id) REFERENCES article_rules(id) ON DELETE CASCADE,
+			FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("create article_rule_feeds table: %w", err)
+	}
+
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_article_rule_feeds_feed
+			ON article_rule_feeds(feed_id)
+	`); err != nil {
+		return fmt.Errorf("create idx_article_rule_feeds_feed: %w", err)
+	}
+
 	return nil
 }
 

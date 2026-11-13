@@ -94,4 +94,18 @@ describe("EntryListItem", () => {
     expect(summary.className).toContain("wrap-anywhere");
     expect(summary.className).toContain("line-clamp-3");
   });
+
+  it("hides the summary when showSummary is false", () => {
+    render(
+      <EntryListItem
+        entry={entry}
+        feed={feed}
+        isSelected={false}
+        onClick={vi.fn()}
+        showSummary={false}
+      />,
+    );
+
+    expect(screen.queryByText("Entry summary")).toBeNull();
+  });
 });

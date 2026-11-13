@@ -35,6 +35,7 @@ func TestHandler_RegisterRoutes(t *testing.T) {
 	handler.NewFeedHandler(nil, nil).RegisterRoutes(g)
 	handler.NewFolderHandler(nil).RegisterRoutes(g)
 	handler.NewProxyHandler(nil).RegisterRoutes(g)
+	handler.NewRuleHandler(nil).RegisterRoutes(g)
 	handler.NewOPMLHandler(nil, nil).RegisterRoutes(g)
 	handler.NewSettingsHandler(nil, network.NewClientFactoryForTest(&http.Client{})).RegisterRoutes(g)
 
@@ -75,6 +76,7 @@ func TestHandler_RegisterRoutes(t *testing.T) {
 
 	assertRoute(t, routes, http.MethodPost, "/feeds")
 	assertRoute(t, routes, http.MethodPost, "/feeds/refresh")
+	assertRoute(t, routes, http.MethodPost, "/feeds/:id/refresh")
 	assertRoute(t, routes, http.MethodGet, "/feeds/refresh")
 	assertRoute(t, routes, http.MethodGet, "/feeds/preview")
 	assertRoute(t, routes, http.MethodGet, "/feeds")
@@ -99,6 +101,13 @@ func TestHandler_RegisterRoutes(t *testing.T) {
 	assertRoute(t, routes, http.MethodGet, "/opml/export")
 
 	assertRoute(t, routes, http.MethodGet, "/proxy/image/:encoded")
+
+	assertRoute(t, routes, http.MethodGet, "/rules")
+	assertRoute(t, routes, http.MethodPost, "/rules")
+	assertRoute(t, routes, http.MethodPut, "/rules/:id")
+	assertRoute(t, routes, http.MethodDelete, "/rules/:id")
+	assertRoute(t, routes, http.MethodPatch, "/rules/:id/enabled")
+	assertRoute(t, routes, http.MethodPost, "/rules/:id/run")
 
 	assertRoute(t, routes, http.MethodGet, "/settings/ai")
 	assertRoute(t, routes, http.MethodPut, "/settings/ai")

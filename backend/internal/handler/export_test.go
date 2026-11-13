@@ -27,6 +27,8 @@ type NetworkTestResponse = networkTestResponse
 type GeneralSettingsResponse = generalSettingsResponse
 type AppearanceSettingsResponse = appearanceSettingsResponse
 type AITestResponse = aiTestResponse
+type RuleResponse = ruleResponse
+type RuleRunResponse = ruleRunResponse
 
 var NewFeedHandlerHelper = NewFeedHandler
 var NewEntryHandlerHelper = NewEntryHandler
@@ -38,6 +40,7 @@ var NewDomainRateLimitHandlerHelper = NewDomainRateLimitHandler
 var NewOPMLHandlerHelper = NewOPMLHandler
 var NewIconHandlerHelper = NewIconHandler
 var NewProxyHandlerHelper = NewProxyHandler
+var NewRuleHandlerHelper = NewRuleHandler
 
 var WriteServiceError = writeServiceError
 var IDPtrToString = idPtrToString

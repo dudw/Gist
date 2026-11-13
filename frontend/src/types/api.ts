@@ -103,3 +103,56 @@ export interface ImportTask {
   error?: string;
   createdAt?: string;
 }
+
+export type RuleField =
+  | "title_or_content"
+  | "title"
+  | "content"
+  | "author"
+  | "url"
+  | "url_no_domain";
+
+export type RuleOperator =
+  | "contains"
+  | "not_contains"
+  | "is"
+  | "is_not"
+  | "starts_with"
+  | "ends_with"
+  | "regex"
+  | "not_regex";
+
+export type RuleJoin = "and" | "or";
+
+export interface RuleCondition {
+  join: RuleJoin;
+  field: RuleField;
+  operator: RuleOperator;
+  value: string;
+}
+
+export interface ArticleRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  fullWord: boolean;
+  feedIds: string[];
+  action: { type: "mark_read" };
+  conditions: RuleCondition[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ArticleRuleInput {
+  name: string;
+  enabled: boolean;
+  fullWord: boolean;
+  feedIds: string[];
+  action: { type: "mark_read" };
+  conditions: RuleCondition[];
+}
+
+export interface RuleRunResult {
+  matched: number;
+  updated: number;
+}

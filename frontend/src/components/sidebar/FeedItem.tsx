@@ -27,6 +27,7 @@ interface FeedItemProps {
   unreadCount?: number;
   isActive?: boolean;
   errorMessage?: string;
+  isRefreshing?: boolean;
   onClick?: () => void;
   className?: string;
   folders?: Folder[];
@@ -44,6 +45,7 @@ export function FeedItem({
   unreadCount,
   isActive = false,
   errorMessage,
+  isRefreshing = false,
   onClick,
   className,
   folders = [],
@@ -121,17 +123,29 @@ export function FeedItem({
               </Tooltip>
             )}
           </div>
-          {unreadCount !== undefined && unreadCount > 0 && (
-            <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground">
-              {unreadCount}
-            </span>
+          {isRefreshing ? (
+            <span
+              role="status"
+              aria-label={t("actions.updating")}
+              className="size-3 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-transparent"
+            />
+          ) : (
+            unreadCount !== undefined &&
+            unreadCount > 0 && (
+              <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground">
+                {unreadCount}
+              </span>
+            )
           )}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         {onRefresh && (
-          <ContextMenuItem onClick={() => onRefresh(feedId)}>
-            {t("actions.refresh")}
+          <ContextMenuItem
+            disabled={isRefreshing}
+            onClick={() => onRefresh(feedId)}
+          >
+            {isRefreshing ? t("actions.updating") : t("actions.refresh")}
           </ContextMenuItem>
         )}
         {onEdit && (

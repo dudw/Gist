@@ -5,6 +5,13 @@ import { formatRelativeTime } from "@/lib/date-utils";
 import { stripHtml } from "@/lib/html-utils";
 import { useTranslationStore } from "@/stores/translation-store";
 import { FeedIcon } from "@/components/ui/feed-icon";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { Entry, Feed } from "@/types/api";
 
 const URL_PATTERN = /\bhttps?:\/\/\S+/i;
@@ -14,6 +21,10 @@ interface EntryListItemProps {
   feed?: Feed;
   isSelected: boolean;
   onClick: () => void;
+  onMarkAboveRead?: (entryId: string) => void;
+  onMarkBelowRead?: (entryId: string) => void;
+  onAddRule?: (feedId: string) => void;
+  showSummary?: boolean;
   autoTranslate?: boolean;
   targetLanguage?: string;
   style?: React.CSSProperties;
@@ -28,6 +39,10 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
       feed,
       isSelected,
       onClick,
+      onMarkAboveRead,
+      onMarkBelowRead,
+      onAddRule,
+      showSummary = true,
       autoTranslate,
       targetLanguage,
       style,
@@ -57,7 +72,9 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
     );
 
     const displayTitle = translation?.title ?? entry.title;
-    const displaySummary = translation?.summary ?? strippedContent;
+    const displaySummary = showSummary
+      ? (translation?.summary ?? strippedContent)
+      : null;
     const displayFeedName = feed?.title || fallbackFeedName;
     const titleContainsUrl = URL_PATTERN.test(displayTitle ?? "");
     const summaryContainsUrl = URL_PATTERN.test(displaySummary ?? "");
@@ -66,7 +83,7 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
       <div
         ref={ref}
         className={cn(
-          "w-full min-w-0 overflow-hidden px-4 py-3 cursor-pointer transition-colors",
+          "relative w-full min-w-0 overflow-hidden px-4 py-3 cursor-pointer transition-colors",
           "hover:bg-item-hover",
           isSelected && "bg-item-active",
           !entry.read && !isSelected && "bg-accent/5",
@@ -103,6 +120,7 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
             "mt-1 text-sm wrap-anywhere",
             titleContainsUrl ? "line-clamp-3" : "line-clamp-2",
             !entry.read ? "font-semibold" : "font-medium text-muted-foreground",
+            !displaySummary && "pr-10",
           )}
         >
           {displayTitle || fallbackTitle}
@@ -112,13 +130,53 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
         {displaySummary && (
           <div
             className={cn(
-              "mt-1 text-xs text-muted-foreground wrap-anywhere",
+              "mt-1 pr-10 text-xs text-muted-foreground wrap-anywhere",
               summaryContainsUrl ? "line-clamp-3" : "line-clamp-2",
             )}
           >
             {displaySummary}
           </div>
         )}
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("entry.more_actions")}
+              title={t("entry.more_actions")}
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              className="absolute bottom-1.5 right-2.5 flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-item-hover hover:text-foreground data-[state=open]:bg-item-hover data-[state=open]:text-foreground"
+            >
+              <svg
+                className="size-4"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <circle cx="5" cy="12" r="1.6" />
+                <circle cx="12" cy="12" r="1.6" />
+                <circle cx="19" cy="12" r="1.6" />
+              </svg>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[11rem]">
+            <DropdownMenuItem onSelect={() => onAddRule?.(entry.feedId)}>
+              {t("entry.add_rule")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => onMarkAboveRead?.(entry.id)}
+            >
+              {t("entry.mark_above_read")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => onMarkBelowRead?.(entry.id)}
+            >
+              {t("entry.mark_below_read")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     );
   },

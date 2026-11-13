@@ -163,6 +163,7 @@ func (s *refreshService) processParsedFeed(ctx context.Context, feed model.Feed,
 // Returns the count of new and updated entries.
 func (s *refreshService) saveEntries(ctx context.Context, feedID int64, items []*gofeed.Item) (newCount, updatedCount int) {
 	dynamicTime := hasDynamicTime(items)
+	compiledRules := s.enabledRulesForFeed(ctx, feedID)
 	for _, item := range items {
 		entry := itemToEntry(feedID, item, dynamicTime)
 		if entry.URL == nil || *entry.URL == "" {
@@ -183,6 +184,10 @@ func (s *refreshService) saveEntries(ctx context.Context, feedID int64, items []
 			exists = legacyExists
 		}
 
+		if !exists && matchesAnyRule(compiledRules, entry) {
+			entry.Read = true
+		}
+
 		if err := s.entries.CreateOrUpdate(ctx, entry); err != nil {
 			logger.Warn("save entry failed", "module", "service", "action", "save", "resource", "entry", "result", "failed", "error", err)
 			continue
@@ -197,12 +202,48 @@ func (s *refreshService) saveEntries(ctx context.Context, feedID int64, items []
 	return
 }
 
+func (s *refreshService) enabledRulesForFeed(ctx context.Context, feedID int64) []*CompiledArticleRule {
+	if s.rules == nil {
+		return nil
+	}
+	rules, err := s.rules.ListEnabledForFeed(ctx, feedID)
+	if err != nil {
+		logger.Warn("load article rules failed", "module", "service", "action", "list", "resource", "rule", "result", "failed", "feed_id", feedID, "error", err)
+		return nil
+	}
+
+	compiled := make([]*CompiledArticleRule, 0, len(rules))
+	for _, rule := range rules {
+		item, err := CompileArticleRule(rule)
+		if err != nil {
+			logger.Warn("compile article rule failed", "module", "service", "action", "compile", "resource", "rule", "result", "failed", "rule_id", rule.ID, "error", err)
+			continue
+		}
+		compiled = append(compiled, item)
+	}
+	return compiled
+}
+
+func matchesAnyRule(rules []*CompiledArticleRule, entry model.Entry) bool {
+	for _, rule := range rules {
+		if rule.Matches(entry) {
+			return true
+		}
+	}
+	return false
+}
+
 var ErrAlreadyRefreshing = errors.New("refresh already in progress")
 
 // RefreshStatus holds the current state of the feed refresh process.
 type RefreshStatus struct {
 	IsRefreshing    bool
 	LastRefreshedAt *time.Time
+}
+
+// RuleProvider is the narrow rule dependency needed by the refresh pipeline.
+type RuleProvider interface {
+	ListEnabledForFeed(ctx context.Context, feedID int64) ([]model.ArticleRule, error)
 }
 
 type RefreshService interface {
@@ -221,12 +262,13 @@ type refreshService struct {
 	clientFactory   *network.ClientFactory
 	anubis          AnubisSolver
 	rateLimitSvc    DomainRateLimitService
+	rules           RuleProvider
 	mu              sync.Mutex
 	isRefreshing    bool
 	lastRefreshedAt *time.Time
 }
 
-func NewRefreshService(feeds repository.FeedRepository, entries repository.EntryRepository, settings SettingsService, icons IconService, clientFactory *network.ClientFactory, anubisSolver AnubisSolver, rateLimitSvc DomainRateLimitService) RefreshService {
+func NewRefreshService(feeds repository.FeedRepository, entries repository.EntryRepository, settings SettingsService, icons IconService, clientFactory *network.ClientFactory, anubisSolver AnubisSolver, rateLimitSvc DomainRateLimitService, rules RuleProvider) RefreshService {
 	return &refreshService{
 		feeds:         feeds,
 		entries:       entries,
@@ -235,6 +277,7 @@ func NewRefreshService(feeds repository.FeedRepository, entries repository.Entry
 		clientFactory: clientFactory,
 		anubis:        anubisSolver,
 		rateLimitSvc:  rateLimitSvc,
+		rules:         rules,
 	}
 }
 
@@ -291,7 +334,20 @@ func (s *refreshService) RefreshFeed(ctx context.Context, feedID int64) error {
 	if err != nil {
 		return err
 	}
-	return s.refreshFeedInternal(ctx, feed)
+	if err := s.refreshFeedInternal(ctx, feed); err != nil {
+		return err
+	}
+
+	// Single-feed refreshes are user initiated, so surface feed-level failures
+	// (for example HTTP 500 responses) instead of silently returning success.
+	updated, err := s.feeds.GetByID(ctx, feedID)
+	if err != nil {
+		return err
+	}
+	if updated.ErrorMessage != nil && *updated.ErrorMessage != "" {
+		return fmt.Errorf("%w: %s", ErrFeedFetch, *updated.ErrorMessage)
+	}
+	return nil
 }
 
 func (s *refreshService) RefreshFeeds(ctx context.Context, feedIDs []int64) error {

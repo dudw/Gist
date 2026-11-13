@@ -10,7 +10,7 @@ lint:
 	golangci-lint run
 
 build:
-	go build -o gist-server ./cmd/server
+	go build -trimpath -ldflags="-s -w" -o gist-server ./cmd/server
 
 cover:
 	go test ./... -coverprofile=coverage.out

@@ -55,6 +55,7 @@ func main() {
 	aiTranslationRepo := repository.NewAITranslationRepository(dbConn)
 	aiListTranslationRepo := repository.NewAIListTranslationRepository(dbConn)
 	domainRateLimitRepo := repository.NewDomainRateLimitRepository(dbConn)
+	articleRuleRepo := repository.NewArticleRuleRepository(dbConn)
 
 	// Initialize rate limiter with stored setting
 	initialRateLimit := ai.DefaultRateLimit
@@ -94,7 +95,8 @@ func main() {
 	entryService := service.NewEntryService(entryRepo, feedRepo, folderRepo)
 	readabilityService := service.NewReadabilityService(entryRepo, clientFactory, anubisSolver)
 	domainRateLimitService := service.NewDomainRateLimitService(domainRateLimitRepo)
-	refreshService := service.NewRefreshService(feedRepo, entryRepo, settingsService, iconService, clientFactory, anubisSolver, domainRateLimitService)
+	ruleService := service.NewRuleService(articleRuleRepo, feedRepo, entryRepo)
+	refreshService := service.NewRefreshService(feedRepo, entryRepo, settingsService, iconService, clientFactory, anubisSolver, domainRateLimitService, ruleService)
 	opmlService := service.NewOPMLService(folderService, feedService, refreshService, iconService, folderRepo, feedRepo)
 
 	proxyService := service.NewProxyService(clientFactory, anubisSolver)
@@ -112,8 +114,9 @@ func main() {
 	aiHandler := handler.NewAIHandler(aiService)
 	authHandler := handler.NewAuthHandler(authService)
 	domainRateLimitHandler := handler.NewDomainRateLimitHandler(domainRateLimitService)
+	ruleHandler := handler.NewRuleHandler(ruleService)
 
-	router := transport.NewRouter(folderHandler, feedHandler, entryHandler, opmlHandler, iconHandler, proxyHandler, settingsHandler, aiHandler, authHandler, domainRateLimitHandler, authService, cfg.StaticDir, cfg.EnableSwagger)
+	router := transport.NewRouter(folderHandler, feedHandler, entryHandler, opmlHandler, iconHandler, proxyHandler, settingsHandler, aiHandler, authHandler, domainRateLimitHandler, ruleHandler, authService, cfg.StaticDir, cfg.EnableSwagger)
 	pprofServer := startPprofServer(cfg.PprofAddr)
 
 	// Start background scheduler (15 minutes interval)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -85,6 +86,7 @@ func NewFeedHandler(service service.FeedService, refreshService service.RefreshS
 func (h *FeedHandler) RegisterRoutes(g *echo.Group) {
 	g.POST("/feeds", h.Create)
 	g.POST("/feeds/refresh", h.RefreshAll)
+	g.POST("/feeds/:id/refresh", h.RefreshFeed)
 	g.GET("/feeds/refresh", h.RefreshStatus)
 	g.GET("/feeds/preview", h.Preview)
 	g.GET("/feeds", h.List)
@@ -363,6 +365,34 @@ func (h *FeedHandler) RefreshAll(c echo.Context) error {
 		return writeServiceError(c, err)
 	}
 	logger.Info("feed refresh triggered", "module", "handler", "action", "refresh", "resource", "feed", "result", "ok")
+	return c.NoContent(http.StatusNoContent)
+}
+
+// RefreshFeed triggers a refresh of a single feed.
+// @Summary Refresh a feed
+// @Description Trigger an immediate refresh of a subscribed feed
+// @Tags feeds
+// @Param id path int true "Feed ID"
+// @Success 204 "No Content"
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 502 {object} errorResponse "Feed fetch failed"
+// @Router /feeds/{id}/refresh [post]
+func (h *FeedHandler) RefreshFeed(c echo.Context) error {
+	id, err := parseIDParam(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Error: "invalid request"})
+	}
+
+	if err := h.refreshService.RefreshFeed(c.Request().Context(), id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return c.JSON(http.StatusNotFound, errorResponse{Error: "resource not found"})
+		}
+		logger.Error("feed refresh failed", "module", "handler", "action", "refresh", "resource", "feed", "result", "failed", "feed_id", id, "error", err)
+		return writeServiceError(c, err)
+	}
+
+	logger.Info("feed refreshed", "module", "handler", "action", "refresh", "resource", "feed", "result", "ok", "feed_id", id)
 	return c.NoContent(http.StatusNoContent)
 }
 

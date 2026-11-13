@@ -4,14 +4,24 @@ interface UISettings {
   feedColWidth: number;
   entryColWidth: number;
   sidebarVisible: boolean;
+  articleWidth: number;
+  showEntrySummary: boolean;
+  hideReadEntries: boolean;
 }
 
 const STORAGE_KEY = "gist-ui-settings";
+
+export const ARTICLE_WIDTH_MIN = 45;
+export const ARTICLE_WIDTH_MAX = 100;
+export const ARTICLE_WIDTH_STEP = 5;
 
 export const defaultUISettings: UISettings = {
   feedColWidth: 256,
   entryColWidth: 356,
   sidebarVisible: true,
+  articleWidth: 65,
+  showEntrySummary: true,
+  hideReadEntries: false,
 };
 
 function getStoredSettings(): UISettings {
@@ -96,8 +106,24 @@ export function useUISettingActions() {
     setUISetting("entryColWidth", width);
   }, []);
 
+  const setArticleWidth = useCallback((width: number) => {
+    const clamped = Math.min(
+      ARTICLE_WIDTH_MAX,
+      Math.max(ARTICLE_WIDTH_MIN, Math.round(width)),
+    );
+    setUISetting("articleWidth", clamped);
+  }, []);
+
   const setSidebarVisible = useCallback((visible: boolean) => {
     setUISetting("sidebarVisible", visible);
+  }, []);
+
+  const setShowEntrySummary = useCallback((visible: boolean) => {
+    setUISetting("showEntrySummary", visible);
+  }, []);
+
+  const setHideReadEntries = useCallback((hidden: boolean) => {
+    setUISetting("hideReadEntries", hidden);
   }, []);
 
   const toggleSidebarVisible = useCallback(() => {
@@ -109,11 +135,17 @@ export function useUISettingActions() {
     setUISetting("feedColWidth", defaultUISettings.feedColWidth);
     setUISetting("entryColWidth", defaultUISettings.entryColWidth);
     setUISetting("sidebarVisible", defaultUISettings.sidebarVisible);
+    setUISetting("articleWidth", defaultUISettings.articleWidth);
+    setUISetting("showEntrySummary", defaultUISettings.showEntrySummary);
+    setUISetting("hideReadEntries", defaultUISettings.hideReadEntries);
   }, []);
 
   return {
     setFeedColWidth,
     setEntryColWidth,
+    setArticleWidth,
+    setShowEntrySummary,
+    setHideReadEntries,
     setSidebarVisible,
     toggleSidebarVisible,
     resetToDefaults,

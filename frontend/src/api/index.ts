@@ -1,5 +1,7 @@
 import type {
   ApiErrorResponse,
+  ArticleRule,
+  ArticleRuleInput,
   ContentType,
   Entry,
   EntryListParams,
@@ -9,6 +11,7 @@ import type {
   Folder,
   ImportTask,
   MarkAllReadParams,
+  RuleRunResult,
   StarredCountResponse,
   UnreadCountsResponse,
 } from "@/types/api";
@@ -422,6 +425,12 @@ export async function deleteFeeds(ids: string[]): Promise<void> {
 
 export async function refreshAllFeeds(): Promise<void> {
   return request<void>("/api/feeds/refresh", {
+    method: "POST",
+  });
+}
+
+export async function refreshFeed(id: string): Promise<void> {
+  return request<void>(`/api/feeds/${id}/refresh`, {
     method: "POST",
   });
 }
@@ -980,5 +989,50 @@ export async function updateDomainRateLimit(
 export async function deleteDomainRateLimit(host: string): Promise<void> {
   return request<void>(`/api/domain-rate-limits/${encodeURIComponent(host)}`, {
     method: "DELETE",
+  });
+}
+
+// Article Rule API
+
+export async function listRules(): Promise<ArticleRule[]> {
+  return request<ArticleRule[]>("/api/rules");
+}
+
+export async function createRule(rule: ArticleRuleInput): Promise<ArticleRule> {
+  return request<ArticleRule>("/api/rules", {
+    method: "POST",
+    body: JSON.stringify(rule),
+  });
+}
+
+export async function updateRule(
+  id: string,
+  rule: ArticleRuleInput,
+): Promise<ArticleRule> {
+  return request<ArticleRule>(`/api/rules/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(rule),
+  });
+}
+
+export async function deleteRule(id: string): Promise<void> {
+  return request<void>(`/api/rules/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function setRuleEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<void> {
+  return request<void>(`/api/rules/${id}/enabled`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function runRule(id: string): Promise<RuleRunResult> {
+  return request<RuleRunResult>(`/api/rules/${id}/run`, {
+    method: "POST",
   });
 }

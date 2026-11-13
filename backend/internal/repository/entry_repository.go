@@ -31,6 +31,7 @@ type UnreadCount struct {
 type EntryRepository interface {
 	GetByID(ctx context.Context, id int64) (model.Entry, error)
 	List(ctx context.Context, filter EntryListFilter) ([]model.Entry, error)
+	ListUnreadForRule(ctx context.Context, feedIDs []int64, afterID int64, limit int) ([]model.Entry, error)
 	UpdateReadStatus(ctx context.Context, id int64, read bool) error
 	UpdateManyReadStatus(ctx context.Context, ids []int64, read bool) error
 	UpdateStarredStatus(ctx context.Context, id int64, starred bool) error
@@ -147,6 +148,51 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func (r *entryRepository) ListUnreadForRule(ctx context.Context, feedIDs []int64, afterID int64, limit int) ([]model.Entry, error) {
+	if len(feedIDs) == 0 {
+		return []model.Entry{}, nil
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+
+	placeholders := make([]string, len(feedIDs))
+	args := make([]interface{}, 0, len(feedIDs)+2)
+	for i, feedID := range feedIDs {
+		placeholders[i] = "?"
+		args = append(args, feedID)
+	}
+	args = append(args, afterID, limit)
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, feed_id, hash, title, url, content, readable_content, thumbnail_url, author,
+		       published_at, read, starred, created_at, updated_at
+		FROM entries
+		WHERE feed_id IN (`+strings.Join(placeholders, ",")+`)
+		  AND read = 0
+		  AND id > ?
+		ORDER BY id
+		LIMIT ?
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	entries := make([]model.Entry, 0)
+	for rows.Next() {
+		entry, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 func (r *entryRepository) UpdateReadStatus(ctx context.Context, id int64, read bool) error {
@@ -365,7 +411,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 	_, err := r.db.ExecContext(
 		ctx,
 		`INSERT INTO entries (id, feed_id, hash, title, url, content, thumbnail_url, author, published_at, read, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(feed_id, hash) DO UPDATE SET
 		   title = excluded.title,
 		   url = excluded.url,
@@ -383,6 +429,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 		entry.ThumbnailURL,
 		entry.Author,
 		publishedAt,
+		boolToInt(entry.Read),
 		now,
 		now,
 	)

@@ -1,13 +1,14 @@
 package handler_test
 
 import (
-	"gist/backend/internal/handler"
+	"database/sql"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"gist/backend/internal/handler"
 	"gist/backend/internal/model"
 	"gist/backend/internal/service"
 	"gist/backend/internal/service/mock"
@@ -286,6 +287,90 @@ func TestFeedHandler_RefreshAll_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestFeedHandler_RefreshFeed_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := mock.NewMockFeedService(ctrl)
+	mockRefreshService := mock.NewMockRefreshService(ctrl)
+	h := handler.NewFeedHandlerHelper(mockService, mockRefreshService)
+
+	e := newTestEcho()
+	req := newJSONRequest(http.MethodPost, "/feeds/1/refresh", nil)
+	c, rec := newTestContext(e, req)
+	setPathParams(c, map[string]string{"id": "1"})
+
+	mockRefreshService.EXPECT().
+		RefreshFeed(gomock.Any(), int64(1)).
+		Return(nil)
+
+	err := h.RefreshFeed(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestFeedHandler_RefreshFeed_InvalidID(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := mock.NewMockFeedService(ctrl)
+	mockRefreshService := mock.NewMockRefreshService(ctrl)
+	h := handler.NewFeedHandlerHelper(mockService, mockRefreshService)
+
+	e := newTestEcho()
+	req := newJSONRequest(http.MethodPost, "/feeds/not-a-number/refresh", nil)
+	c, rec := newTestContext(e, req)
+	setPathParams(c, map[string]string{"id": "not-a-number"})
+
+	err := h.RefreshFeed(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestFeedHandler_RefreshFeed_NotFound(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := mock.NewMockFeedService(ctrl)
+	mockRefreshService := mock.NewMockRefreshService(ctrl)
+	h := handler.NewFeedHandlerHelper(mockService, mockRefreshService)
+
+	e := newTestEcho()
+	req := newJSONRequest(http.MethodPost, "/feeds/404/refresh", nil)
+	c, rec := newTestContext(e, req)
+	setPathParams(c, map[string]string{"id": "404"})
+
+	mockRefreshService.EXPECT().
+		RefreshFeed(gomock.Any(), int64(404)).
+		Return(sql.ErrNoRows)
+
+	err := h.RefreshFeed(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestFeedHandler_RefreshFeed_FetchFailed(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := mock.NewMockFeedService(ctrl)
+	mockRefreshService := mock.NewMockRefreshService(ctrl)
+	h := handler.NewFeedHandlerHelper(mockService, mockRefreshService)
+
+	e := newTestEcho()
+	req := newJSONRequest(http.MethodPost, "/feeds/2/refresh", nil)
+	c, rec := newTestContext(e, req)
+	setPathParams(c, map[string]string{"id": "2"})
+
+	mockRefreshService.EXPECT().
+		RefreshFeed(gomock.Any(), int64(2)).
+		Return(service.ErrFeedFetch)
+
+	err := h.RefreshFeed(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
 func TestFeedHandler_Preview_Success(t *testing.T) {

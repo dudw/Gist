@@ -6,6 +6,10 @@ import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useGeneralSettings } from "@/hooks/useGeneralSettings";
+import {
+  useUISettingActions,
+  useUISettingKey,
+} from "@/hooks/useUISettings";
 
 type Language = "zh" | "en";
 
@@ -17,6 +21,9 @@ export function GeneralSettings() {
   const [fallbackUA, setFallbackUA] = useState("");
   const [autoReadability, setAutoReadability] = useState(false);
   const [markReadOnScroll, setMarkReadOnScroll] = useState(false);
+  const showEntrySummary = useUISettingKey("showEntrySummary");
+  const hideReadEntries = useUISettingKey("hideReadEntries");
+  const { setShowEntrySummary, setHideReadEntries } = useUISettingActions();
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">(
     "idle",
@@ -159,6 +166,42 @@ export function GeneralSettings() {
             checked={markReadOnScroll}
             onCheckedChange={handleMarkReadOnScrollChange}
             disabled={settingsDisabled}
+          />
+        </div>
+      </section>
+
+      {/* Entry Summary Section */}
+      <section>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">
+              {t("settings.show_entry_summary")}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t("settings.show_entry_summary_description")}
+            </div>
+          </div>
+          <Switch
+            checked={showEntrySummary}
+            onCheckedChange={setShowEntrySummary}
+          />
+        </div>
+      </section>
+
+      {/* Hide Read Entries Section */}
+      <section>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">
+              {t("settings.hide_read_entries")}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t("settings.hide_read_entries_description")}
+            </div>
+          </div>
+          <Switch
+            checked={hideReadEntries}
+            onCheckedChange={setHideReadEntries}
           />
         </div>
       </section>

@@ -1,5 +1,16 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listFeeds, deleteFeed, updateFeed, updateFeedType } from "@/api";
+import {
+  useQuery,
+  useMutation,
+  useMutationState,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
+  listFeeds,
+  deleteFeed,
+  updateFeed,
+  updateFeedType,
+  refreshFeed,
+} from "@/api";
 import type { ContentType } from "@/types/api";
 
 export function useFeeds() {
@@ -48,5 +59,29 @@ export function useUpdateFeedType() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["feeds"] });
     },
+  });
+}
+
+export function useRefreshFeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: ["refresh-feed"],
+    mutationFn: (id: string) => refreshFeed(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: ["unreadCounts"] });
+      queryClient.invalidateQueries({ queryKey: ["feeds"] });
+    },
+    onError: () => {
+      // Refresh the feed list so the backend error message becomes visible.
+      queryClient.invalidateQueries({ queryKey: ["feeds"] });
+    },
+  });
+}
+
+export function useRefreshingFeedIds(): string[] {
+  return useMutationState({
+    filters: { mutationKey: ["refresh-feed"], status: "pending" },
+    select: (mutation) => mutation.state.variables as string,
   });
 }

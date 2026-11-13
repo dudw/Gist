@@ -4,13 +4,20 @@ import {
   useRef,
   useMemo,
   useCallback,
+  useState,
+  type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { useEntriesInfinite, useUnreadCounts } from "@/hooks/useEntries";
+import {
+  useEntriesInfinite,
+  useMarkManyAsRead,
+  useUnreadCounts,
+} from "@/hooks/useEntries";
 import { useFeeds } from "@/hooks/useFeeds";
 import { useFolders } from "@/hooks/useFolders";
 import { useAISettings } from "@/hooks/useAISettings";
 import { useGeneralSettings } from "@/hooks/useGeneralSettings";
+import { useUISettingKey } from "@/hooks/useUISettings";
 import { useSwipeGesture } from "@/hooks/useSwipeGesture";
 import { selectionToParams, type SelectionType } from "@/hooks/useSelection";
 import { flattenUniqueEntries } from "@/lib/entry-pagination";
@@ -26,6 +33,7 @@ import { translationActions } from "@/stores/translation-store";
 import { selectionScrollKey, entryListScrollPositions } from "./scroll-key";
 import { useScrollToTop } from "@/hooks/useScrollToTop";
 import { MobileDocumentHeader } from "@/components/layout/MobileDocumentHeader";
+import { RuleEditorDialog } from "@/components/rules/RuleEditorDialog";
 import { cn } from "@/lib/utils";
 import { useScrollMarkRead } from "./useScrollMarkRead";
 import { useEntryListScrollSurface } from "./scroll-surface";
@@ -45,6 +53,46 @@ interface EntryListProps {
   onToggleSidebar?: () => void;
   sidebarVisible?: boolean;
   isActive?: boolean;
+}
+
+const KEYBOARD_NAVIGATION_IGNORE_SELECTOR = [
+  "input",
+  "textarea",
+  "select",
+  "video",
+  "audio",
+  '[contenteditable="true"]',
+  '[role="dialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
+  '[role="slider"]',
+  '[role="tablist"]',
+].join(", ");
+
+function shouldIgnoreKeyboardNavigation(event: KeyboardEvent): boolean {
+  if (event.defaultPrevented || event.isComposing) return true;
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return true;
+  }
+
+  const target = event.target;
+  if (
+    target instanceof Element &&
+    target.closest(KEYBOARD_NAVIGATION_IGNORE_SELECTOR)
+  ) {
+    return true;
+  }
+
+  // Media overlays lock the page body; menus and the mobile sidebar are portaled.
+  if (document.body.style.position === "fixed") return true;
+  if (document.querySelector('[data-slot="sheet-content"]')) return true;
+  if (
+    document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export function EntryList({
@@ -69,6 +117,8 @@ export function EntryList({
   const containerRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const listWrapperRef = useRef<HTMLDivElement>(null);
+  const [ruleEditorOpen, setRuleEditorOpen] = useState(false);
+  const [ruleEditorFeedIds, setRuleEditorFeedIds] = useState<string[]>([]);
   const usesDocumentScroll = Boolean(isMobile);
   const scrollSurface = useEntryListScrollSurface({
     documentScroll: usesDocumentScroll,
@@ -94,8 +144,26 @@ export function EntryList({
   const { data: aiSettings } = useAISettings();
   const { data: generalSettings } = useGeneralSettings();
   const { data: unreadCounts } = useUnreadCounts();
+  const { mutate: markManyAsRead } = useMarkManyAsRead();
+  const showEntrySummary = useUISettingKey("showEntrySummary");
+  const hideReadEntries = useUISettingKey("hideReadEntries");
+
+  // Save/restore scroll position per selection+contentType
+  const scrollKey = selectionScrollKey(selection, contentType);
+  const viewKey = `${scrollKey}\u0000${unreadOnly}`;
+  const [showAllView, setShowAllView] = useState<{
+    key: string;
+    value: boolean;
+  }>({ key: "", value: false });
+  const showAllOverride = showAllView.key === viewKey && showAllView.value;
+  const unreadMode = (unreadOnly || hideReadEntries) && !showAllOverride;
+  const setShowAllOverride = useCallback(
+    (value: boolean) => setShowAllView({ key: viewKey, value }),
+    [viewKey],
+  );
+
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
-    useEntriesInfinite({ ...params, unreadOnly });
+    useEntriesInfinite({ ...params, unreadOnly: unreadMode });
 
   // Swipe gesture: Right swipe opens sidebar (only on mobile)
   useSwipeGesture(listWrapperRef, {
@@ -119,7 +187,6 @@ export function EntryList({
   const markReadOnScroll = generalSettings?.markReadOnScroll ?? false;
 
   // Save/restore scroll position per selection+contentType
-  const scrollKey = selectionScrollKey(selection, contentType);
 
   // Restore scroll position on same-mount key change (e.g., article -> notification)
   // and remount (e.g., returning from picture mode).
@@ -205,19 +272,99 @@ export function EntryList({
   }, [folders]);
 
   const entries = useMemo(() => flattenUniqueEntries(data?.pages), [data]);
+
+  const unreadEntryIds = useMemo(
+    () => entries.filter((entry) => !entry.read).map((entry) => entry.id),
+    [entries],
+  );
+
+  const handleMarkAreaRead = useCallback(() => {
+    if (unreadEntryIds.length === 0) return;
+    markManyAsRead({ ids: unreadEntryIds, read: true });
+  }, [markManyAsRead, unreadEntryIds]);
+
+  const handleToggleUnreadMode = useCallback(() => {
+    if (unreadMode) {
+      setShowAllOverride(true);
+      return;
+    }
+    if (showAllOverride) {
+      setShowAllOverride(false);
+      return;
+    }
+    onToggleUnreadOnly();
+  }, [onToggleUnreadOnly, setShowAllOverride, showAllOverride, unreadMode]);
+
+  const handleMarkRangeRead = useCallback(
+    (entryId: string, direction: "above" | "below") => {
+      const currentIndex = entries.findIndex((entry) => entry.id === entryId);
+      if (currentIndex === -1) return;
+
+      const range =
+        direction === "above"
+          ? entries.slice(0, currentIndex)
+          : entries.slice(currentIndex + 1);
+      const ids = range
+        .filter((entry) => !entry.read)
+        .map((entry) => entry.id);
+      if (ids.length === 0) return;
+
+      markManyAsRead({ ids, read: true });
+    },
+    [entries, markManyAsRead],
+  );
+
+  const handleAddRule = useCallback((feedId: string) => {
+    setRuleEditorFeedIds([feedId]);
+    setRuleEditorOpen(true);
+  }, []);
+
   const { endPaddingHeight: scrollReadEndPaddingHeight } = useScrollMarkRead({
     surface: scrollSurface,
     contentRootRef: containerRef,
     entries,
     enabled: markReadOnScroll && isActive,
-    unreadOnly,
+    unreadOnly: unreadMode,
     hasNextPage: Boolean(hasNextPage),
-    resetKey: `${scrollKey}\u0000${unreadOnly}\u0000${markReadOnScroll}`,
+    resetKey: `${scrollKey}\u0000${unreadMode}\u0000${markReadOnScroll}`,
   });
 
   useEffect(() => {
     maybeFetchNextPage();
   }, [entries.length, maybeFetchNextPage]);
+
+  useEffect(() => {
+    if (!isActive || entries.length === 0) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      if (shouldIgnoreKeyboardNavigation(event)) return;
+
+      const currentIndex = selectedEntryId
+        ? entries.findIndex((entry) => entry.id === selectedEntryId)
+        : -1;
+      const nextIndex =
+        event.key === "ArrowDown"
+          ? Math.min(currentIndex + 1, entries.length - 1)
+          : Math.max(currentIndex - 1, 0);
+
+      if (nextIndex === currentIndex) return;
+
+      const nextEntry = entries[nextIndex];
+      if (!nextEntry) return;
+
+      event.preventDefault();
+      handleSelectEntry(nextEntry.id);
+
+      const node = containerRef.current?.querySelector<HTMLElement>(
+        `[data-entry-id="${nextEntry.id}"]`,
+      );
+      node?.scrollIntoView?.({ block: "nearest" });
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [entries, handleSelectEntry, isActive, selectedEntryId]);
 
   // Function to trigger batch translation for pending entries
   const triggerBatchTranslation = useCallback(() => {
@@ -431,8 +578,8 @@ export function EntryList({
         <EntryListHeader
           title={title}
           unreadCount={unreadCount}
-          unreadOnly={unreadOnly}
-          onToggleUnreadOnly={onToggleUnreadOnly}
+          unreadOnly={unreadMode}
+          onToggleUnreadOnly={handleToggleUnreadMode}
           onMarkAllRead={onMarkAllRead}
           scrollToTopScope="entrylist"
           isMobile={isMobile}
@@ -463,7 +610,17 @@ export function EntryList({
           {isLoading ? (
             <EntryListSkeleton />
           ) : entries.length === 0 ? (
-            <EntryListEmpty />
+            <EntryListEmpty
+              unreadMode={unreadMode}
+              footer={
+                <EntryListFooter
+                  unreadCount={0}
+                  unreadMode={unreadMode}
+                  onMarkAreaRead={handleMarkAreaRead}
+                  onToggleViewAll={handleToggleUnreadMode}
+                />
+              }
+            />
           ) : (
             <div className="w-full">
               {entries.map((entry, index) => (
@@ -475,10 +632,24 @@ export function EntryList({
                   feed={feedsMap.get(entry.feedId)}
                   isSelected={entry.id === selectedEntryId}
                   onClick={() => handleSelectEntry(entry.id)}
+                  onMarkAboveRead={(entryId) =>
+                    handleMarkRangeRead(entryId, "above")
+                  }
+                  onMarkBelowRead={(entryId) =>
+                    handleMarkRangeRead(entryId, "below")
+                  }
+                  onAddRule={handleAddRule}
+                  showSummary={showEntrySummary}
                   autoTranslate={autoTranslate}
                   targetLanguage={targetLanguage}
                 />
               ))}
+              <EntryListFooter
+                unreadCount={unreadEntryIds.length}
+                unreadMode={unreadMode}
+                onMarkAreaRead={handleMarkAreaRead}
+                onToggleViewAll={handleToggleUnreadMode}
+              />
               {scrollReadEndPaddingHeight > 0 && (
                 <div
                   aria-hidden="true"
@@ -491,6 +662,14 @@ export function EntryList({
           {isFetchingNextPage && <LoadingMore />}
         </div>
       </div>
+
+      {ruleEditorOpen && (
+        <RuleEditorDialog
+          open={ruleEditorOpen}
+          onOpenChange={setRuleEditorOpen}
+          initialFeedIds={ruleEditorFeedIds}
+        />
+      )}
     </div>
   );
 }
@@ -517,11 +696,55 @@ function EntryListSkeleton() {
   );
 }
 
-function EntryListEmpty() {
+function EntryListEmpty({
+  unreadMode,
+  footer,
+}: {
+  unreadMode: boolean;
+  footer: ReactNode;
+}) {
   const { t } = useTranslation();
   return (
-    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      {t("entry_list.no_articles")}
+    <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 text-center text-sm text-muted-foreground">
+      <div>
+        {unreadMode ? t("entry_list.no_unread") : t("entry_list.no_articles")}
+      </div>
+      {footer}
+    </div>
+  );
+}
+
+function EntryListFooter({
+  unreadCount,
+  unreadMode,
+  onMarkAreaRead,
+  onToggleViewAll,
+}: {
+  unreadCount: number;
+  unreadMode: boolean;
+  onMarkAreaRead: () => void;
+  onToggleViewAll: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col items-center gap-2 px-4 py-6">
+      <button
+        type="button"
+        onClick={onMarkAreaRead}
+        disabled={unreadCount === 0}
+        className="h-9 w-full max-w-[13rem] rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {t("entry_list.mark_area_read")}
+      </button>
+      <button
+        type="button"
+        onClick={onToggleViewAll}
+        className="h-9 w-full max-w-[13rem] rounded-md border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-item-hover"
+      >
+        {unreadMode
+          ? t("entry_list.view_all")
+          : t("entry_list.show_unread_only")}
+      </button>
     </div>
   );
 }

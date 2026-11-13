@@ -32,6 +32,8 @@ import {
   useDeleteFeed,
   useUpdateFeed,
   useUpdateFeedType,
+  useRefreshFeed,
+  useRefreshingFeedIds,
 } from "@/hooks/useFeeds";
 import { useUnreadCounts } from "@/hooks/useEntries";
 import { useAuth } from "@/hooks/useAuth";
@@ -135,6 +137,9 @@ export function Sidebar({
   const { mutate: updateFeed } = useUpdateFeed();
   const { mutate: updateFeedType } = useUpdateFeedType();
   const { mutate: updateFolderType } = useUpdateFolderType();
+  const { mutate: refreshFeed } = useRefreshFeed();
+  const refreshingFeedIds = useRefreshingFeedIds();
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   // Filter by content type - use animatedContentType to keep content in sync with animation
   const folders = useMemo(
@@ -162,6 +167,18 @@ export function Sidebar({
       deleteFeed(feedId);
     },
     [deleteFeed],
+  );
+
+  const handleRefreshFeed = useCallback(
+    (feedId: string) => {
+      setRefreshError(null);
+      refreshFeed(feedId, {
+        onError: () => {
+          setRefreshError(t("feeds.refresh_failed"));
+        },
+      });
+    },
+    [refreshFeed, t],
   );
 
   const handleDeleteFolder = useCallback(
@@ -393,6 +410,8 @@ export function Sidebar({
                           onClick={() => onSelectFeed(feed.id)}
                           className="pl-6"
                           folders={folders}
+                          isRefreshing={refreshingFeedIds.includes(feed.id)}
+                          onRefresh={handleRefreshFeed}
                           onEdit={handleEditFeed}
                           onDelete={handleDeleteFeed}
                           onMoveToFolder={handleMoveToFolder}
@@ -415,6 +434,8 @@ export function Sidebar({
                     onClick={() => onSelectFeed(feed.id)}
                     className="pl-2.5"
                     folders={folders}
+                    isRefreshing={refreshingFeedIds.includes(feed.id)}
+                    onRefresh={handleRefreshFeed}
                     onEdit={handleEditFeed}
                     onDelete={handleDeleteFeed}
                     onMoveToFolder={handleMoveToFolder}
@@ -426,6 +447,23 @@ export function Sidebar({
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {refreshError && (
+        <div
+          role="alert"
+          className="mx-2 mb-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive"
+        >
+          <span className="min-w-0 flex-1">{refreshError}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded px-1 leading-none hover:bg-destructive/10"
+            onClick={() => setRefreshError(null)}
+            aria-label={t("actions.close")}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <SettingsModal open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
       <ProfileModal open={isProfileOpen} onOpenChange={setIsProfileOpen} />

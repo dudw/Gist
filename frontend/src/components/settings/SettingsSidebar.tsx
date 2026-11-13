@@ -160,6 +160,25 @@ export function SettingsSidebar({
       ),
     },
     {
+      id: "rules",
+      label: t("settings.rules"),
+      icon: (
+        <svg
+          className="size-[18px]"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M3 5a1 1 0 011-1h16a1 1 0 011 1v2l-7 7v6l-4 2v-8L3 7V5z"
+          />
+        </svg>
+      ),
+    },
+    {
       id: "advanced",
       label: t("settings.advanced"),
       icon: (

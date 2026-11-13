@@ -47,6 +47,39 @@ func TestEntryRepository_CreateAndGet(t *testing.T) {
 	require.Equal(t, url, *fetched.URL)
 }
 
+func TestEntryRepository_CreateOrUpdate_PreservesReadOnNewEntry(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewEntryRepository(db)
+	ctx := context.Background()
+
+	feedID := testutil.SeedFeed(t, db, model.Feed{Title: "Test Feed", URL: "read-feed"})
+	title := "Already read"
+	url := "https://example.com/already-read"
+	entry := model.Entry{
+		FeedID: feedID,
+		Title:  &title,
+		URL:    &url,
+		Hash:   hashString(url),
+		Read:   true,
+	}
+	require.NoError(t, repo.CreateOrUpdate(ctx, entry))
+
+	entries, err := repo.List(ctx, repository.EntryListFilter{FeedID: &feedID})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.True(t, entries[0].Read)
+
+	entry.Read = false
+	entry.Title = strPtrForRule("Updated title")
+	require.NoError(t, repo.CreateOrUpdate(ctx, entry))
+
+	entries, err = repo.List(ctx, repository.EntryListFilter{FeedID: &feedID})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.True(t, entries[0].Read, "conflict update must not reset read state")
+	require.Equal(t, "Updated title", *entries[0].Title)
+}
+
 func TestEntryRepository_CreateOrUpdate_SameHashUpdatesURL(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewEntryRepository(db)

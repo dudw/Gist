@@ -469,6 +469,89 @@ definitions:
       username:
         type: string
     type: object
+  internal_handler.ruleActionRequest:
+    properties:
+      type:
+        type: string
+    type: object
+  internal_handler.ruleConditionRequest:
+    properties:
+      field:
+        type: string
+      join:
+        type: string
+      operator:
+        type: string
+      value:
+        type: string
+    type: object
+  internal_handler.ruleConditionResponse:
+    properties:
+      field:
+        type: string
+      join:
+        type: string
+      operator:
+        type: string
+      value:
+        type: string
+    type: object
+  internal_handler.ruleRequest:
+    properties:
+      action:
+        $ref: '#/definitions/internal_handler.ruleActionRequest'
+      conditions:
+        items:
+          $ref: '#/definitions/internal_handler.ruleConditionRequest'
+        type: array
+      enabled:
+        type: boolean
+      feedIds:
+        items:
+          type: string
+        type: array
+      fullWord:
+        type: boolean
+      name:
+        type: string
+    type: object
+  internal_handler.ruleResponse:
+    properties:
+      action:
+        $ref: '#/definitions/internal_handler.ruleActionRequest'
+      conditions:
+        items:
+          $ref: '#/definitions/internal_handler.ruleConditionResponse'
+        type: array
+      createdAt:
+        type: string
+      enabled:
+        type: boolean
+      feedIds:
+        items:
+          type: string
+        type: array
+      fullWord:
+        type: boolean
+      id:
+        type: string
+      name:
+        type: string
+      updatedAt:
+        type: string
+    type: object
+  internal_handler.ruleRunResponse:
+    properties:
+      matched:
+        type: integer
+      updated:
+        type: integer
+    type: object
+  internal_handler.setRuleEnabledRequest:
+    properties:
+      enabled:
+        type: boolean
+    type: object
   internal_handler.starredCountResponse:
     properties:
       count:
@@ -1353,6 +1436,33 @@ paths:
       summary: Update a feed
       tags:
       - feeds
+  /feeds/{id}/refresh:
+    post:
+      description: Trigger an immediate refresh of a subscribed feed
+      parameters:
+      - description: Feed ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "502":
+          description: Feed fetch failed
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Refresh a feed
+      tags:
+      - feeds
   /feeds/{id}/type:
     patch:
       consumes:
@@ -1666,6 +1776,147 @@ paths:
       summary: Import Status
       tags:
       - opml
+  /rules:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handler.ruleResponse'
+            type: array
+      summary: List article rules
+      tags:
+      - rules
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rule definition
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ruleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handler.ruleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Create an article rule
+      tags:
+      - rules
+  /rules/{id}:
+    delete:
+      parameters:
+      - description: Rule ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Delete an article rule
+      tags:
+      - rules
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rule ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Rule definition
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ruleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ruleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Update an article rule
+      tags:
+      - rules
+  /rules/{id}/enabled:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Rule ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Enabled state
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.setRuleEnabledRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Enable or disable an article rule
+      tags:
+      - rules
+  /rules/{id}/run:
+    post:
+      parameters:
+      - description: Rule ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ruleRunResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Run an article rule
+      tags:
+      - rules
   /settings/ai:
     get:
       description: Get the AI provider configuration with masked API keys

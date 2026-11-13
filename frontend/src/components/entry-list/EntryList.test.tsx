@@ -84,18 +84,54 @@ vi.mock("./EntryListItem", async () => {
   return {
     EntryListItem: forwardRef<
       HTMLDivElement,
-      { entry: Entry; "data-index"?: number; "data-entry-id"?: string }
+      {
+        entry: Entry;
+        "data-index"?: number;
+        "data-entry-id"?: string;
+        onMarkAboveRead?: (entryId: string) => void;
+        onMarkBelowRead?: (entryId: string) => void;
+        onAddRule?: (feedId: string) => void;
+      }
     >(function MockEntryListItem(
-      { entry, "data-index": dataIndex, "data-entry-id": dataEntryId },
+      {
+        entry,
+        "data-index": dataIndex,
+        "data-entry-id": dataEntryId,
+        onMarkAboveRead,
+        onMarkBelowRead,
+        onAddRule,
+      },
       ref,
     ) {
       mockRenderedEntryListItem(entry.id);
       return (
-        <div ref={ref} data-index={dataIndex} data-entry-id={dataEntryId} />
+        <div ref={ref} data-index={dataIndex} data-entry-id={dataEntryId}>
+          <button
+            type="button"
+            data-testid={`mark-above-${entry.id}`}
+            onClick={() => onMarkAboveRead?.(entry.id)}
+          />
+          <button
+            type="button"
+            data-testid={`mark-below-${entry.id}`}
+            onClick={() => onMarkBelowRead?.(entry.id)}
+          />
+          <button
+            type="button"
+            data-testid={`add-rule-${entry.id}`}
+            onClick={() => onAddRule?.(entry.feedId)}
+          />
+        </div>
       );
     }),
   };
 });
+
+vi.mock("@/components/rules/RuleEditorDialog", () => ({
+  RuleEditorDialog: ({ initialFeedIds }: { initialFeedIds: string[] }) => (
+    <div data-testid="rule-editor">{initialFeedIds.join(",")}</div>
+  ),
+}));
 
 vi.mock("./EntryListHeader", () => ({
   EntryListHeader: () => null,
@@ -106,6 +142,7 @@ import { entryListScrollPositions } from "./scroll-key";
 import { useEntriesInfinite } from "@/hooks/useEntries";
 import { useAISettings } from "@/hooks/useAISettings";
 import { useGeneralSettings } from "@/hooks/useGeneralSettings";
+import { setUISetting } from "@/hooks/useUISettings";
 
 function makeEntry(id: string): Entry {
   return {
@@ -1025,5 +1062,251 @@ describe("EntryList translation scheduling", () => {
       "2",
       "3",
     ]);
+  });
+
+  it("按向下箭头切换到下一条文章", () => {
+    render(<EntryList {...defaultProps} selectedEntryId="2" />);
+
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+
+    expect(defaultProps.onSelectEntry).toHaveBeenCalledWith("3");
+  });
+
+  it("按向上箭头切换到上一条文章", () => {
+    render(<EntryList {...defaultProps} selectedEntryId="3" />);
+
+    fireEvent.keyDown(document.body, { key: "ArrowUp" });
+
+    expect(defaultProps.onSelectEntry).toHaveBeenCalledWith("2");
+  });
+
+  it("没有选中文章时按上下箭头都选中第一条", () => {
+    render(<EntryList {...defaultProps} selectedEntryId={null} />);
+
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    fireEvent.keyDown(document.body, { key: "ArrowUp" });
+
+    expect(defaultProps.onSelectEntry).toHaveBeenNthCalledWith(1, "1");
+    expect(defaultProps.onSelectEntry).toHaveBeenNthCalledWith(2, "1");
+  });
+
+  it("到达列表边界时不会循环切换", () => {
+    const { rerender } = render(
+      <EntryList {...defaultProps} selectedEntryId="5" />,
+    );
+
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    expect(defaultProps.onSelectEntry).not.toHaveBeenCalled();
+
+    rerender(<EntryList {...defaultProps} selectedEntryId="1" />);
+    fireEvent.keyDown(document.body, { key: "ArrowUp" });
+    expect(defaultProps.onSelectEntry).not.toHaveBeenCalled();
+  });
+
+  it("在输入框内按箭头不会切换文章", () => {
+    render(<EntryList {...defaultProps} selectedEntryId="2" />);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+
+    expect(defaultProps.onSelectEntry).not.toHaveBeenCalled();
+    input.remove();
+  });
+
+  it("列表不活跃或弹窗打开时不响应箭头", () => {
+    const { rerender } = render(
+      <EntryList {...defaultProps} selectedEntryId="2" isActive={false} />,
+    );
+
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    expect(defaultProps.onSelectEntry).not.toHaveBeenCalled();
+
+    rerender(<EntryList {...defaultProps} selectedEntryId="2" />);
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+
+    fireEvent.keyDown(dialog, { key: "ArrowDown" });
+
+    expect(defaultProps.onSelectEntry).not.toHaveBeenCalled();
+    dialog.remove();
+  });
+
+  it("从条目菜单打开规则编辑器时预选当前订阅源", () => {
+    render(<EntryList {...defaultProps} />);
+
+    fireEvent.click(screen.getByTestId("add-rule-3"));
+
+    expect(screen.getByTestId("rule-editor").textContent).toBe("feed-1");
+  });
+
+  it("将以上部分标记为已读时只标记当前条目上方的未读项", () => {
+    render(<EntryList {...defaultProps} />);
+
+    fireEvent.click(screen.getByTestId("mark-above-3"));
+
+    expect(mockMarkManyAsRead).toHaveBeenCalledWith({
+      ids: ["1", "2"],
+      read: true,
+    });
+  });
+
+  it("将以下部分标记为已读时只标记当前条目下方的未读项", () => {
+    render(<EntryList {...defaultProps} />);
+
+    fireEvent.click(screen.getByTestId("mark-below-3"));
+
+    expect(mockMarkManyAsRead).toHaveBeenCalledWith({
+      ids: ["4", "5"],
+      read: true,
+    });
+  });
+
+  it("批量标记范围时跳过已读条目", () => {
+    vi.mocked(useEntriesInfinite).mockReturnValue({
+      data: {
+        pages: [
+          {
+            entries: [
+              makeEntry("1"),
+              { ...makeEntry("2"), read: true },
+              makeEntry("3"),
+            ],
+            hasMore: false,
+          },
+        ],
+      },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    render(<EntryList {...defaultProps} />);
+
+    fireEvent.click(screen.getByTestId("mark-above-3"));
+
+    expect(mockMarkManyAsRead).toHaveBeenCalledWith({
+      ids: ["1"],
+      read: true,
+    });
+  });
+});
+
+describe("EntryList read visibility", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    entryListScrollPositions.clear();
+    setUISetting("hideReadEntries", false);
+    mockRenderedEntryListItem.mockReset();
+    vi.mocked(useGeneralSettings).mockReturnValue({
+      data: { markReadOnScroll: false },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    vi.mocked(useAISettings).mockReturnValue({
+      data: { autoTranslate: false, summaryLanguage: "zh-CN" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    vi.mocked(useEntriesInfinite).mockReturnValue({
+      data: { pages: [{ entries: allEntries, hasMore: false }] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+  });
+
+  afterEach(() => {
+    cleanup();
+    setUISetting("hideReadEntries", false);
+    vi.useRealTimers();
+  });
+
+  it("全局不显示已读时按未读模式请求列表", () => {
+    setUISetting("hideReadEntries", true);
+
+    render(<EntryList {...defaultProps} />);
+
+    expect(vi.mocked(useEntriesInfinite)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ unreadOnly: true }),
+    );
+  });
+
+  it("查看全部文章临时关闭未读过滤，切换订阅源后恢复", () => {
+    setUISetting("hideReadEntries", true);
+    const { rerender } = render(<EntryList {...defaultProps} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "entry_list.view_all" }),
+    );
+    expect(vi.mocked(useEntriesInfinite)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ unreadOnly: false }),
+    );
+
+    rerender(
+      <EntryList
+        {...defaultProps}
+        selection={{ type: "feed", feedId: "feed-1" }}
+      />,
+    );
+    expect(vi.mocked(useEntriesInfinite)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ unreadOnly: true }),
+    );
+  });
+
+  it("标记此区域为已读会提交当前列表的未读条目", () => {
+    vi.mocked(useEntriesInfinite).mockReturnValue({
+      data: {
+        pages: [
+          {
+            entries: [
+              makeEntry("1"),
+              { ...makeEntry("2"), read: true },
+              makeEntry("3"),
+            ],
+            hasMore: false,
+          },
+        ],
+      },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    render(<EntryList {...defaultProps} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "entry_list.mark_area_read" }),
+    );
+
+    expect(mockMarkManyAsRead).toHaveBeenCalledWith({
+      ids: ["1", "3"],
+      read: true,
+    });
+  });
+
+  it("未读模式下列表为空时显示未读空状态和操作按钮", () => {
+    setUISetting("hideReadEntries", true);
+    vi.mocked(useEntriesInfinite).mockReturnValue({
+      data: { pages: [] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    render(<EntryList {...defaultProps} />);
+
+    expect(screen.getByText("entry_list.no_unread")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "entry_list.view_all" }),
+    ).toBeTruthy();
   });
 });

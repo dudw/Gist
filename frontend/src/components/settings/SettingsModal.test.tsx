@@ -30,6 +30,9 @@ vi.mock("./tabs/FeedsSettings", () => ({
 vi.mock("./tabs/FoldersSettings", () => ({
   FoldersSettings: () => <div>folders-settings</div>,
 }));
+vi.mock("./tabs/RulesSettings", () => ({
+  RulesSettings: () => <div>rules-settings</div>,
+}));
 vi.mock("./tabs/AdvancedSettings", () => ({
   AdvancedSettings: () => <div>advanced-settings</div>,
 }));

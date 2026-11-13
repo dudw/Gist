@@ -3,6 +3,13 @@ import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useCodeHighlight } from "@/hooks/useCodeHighlight";
 import { useEntryMeta } from "@/hooks/useEntryMeta";
+import {
+  ARTICLE_WIDTH_MAX,
+  ARTICLE_WIDTH_MIN,
+  ARTICLE_WIDTH_STEP,
+  useUISettingActions,
+  useUISettingKey,
+} from "@/hooks/useUISettings";
 import { isSafeUrl } from "@/lib/url";
 import { ArticleContent } from "@/components/ui/article-content";
 import type { ArticleContentBlock } from "@/components/ui/article-content";
@@ -40,6 +47,8 @@ export function EntryContentBody({
   const { publishedLong, readingTime } = useEntryMeta(entry);
   const title = displayTitle ?? entry.title ?? t("entry.untitled");
   const contentRef = useRef<HTMLDivElement>(null);
+  const articleWidth = useUISettingKey("articleWidth");
+  const { setArticleWidth } = useUISettingActions();
 
   // Apply code highlighting after content renders
   useCodeHighlight(contentRef, highlightContent ?? displayContent ?? "");
@@ -53,7 +62,10 @@ export function EntryContentBody({
       ref={scrollRef}
       className="entry-content-viewport flex-1 overflow-y-auto [overflow-anchor:none]"
     >
-      <article className="entry-content mx-auto w-full max-w-[clamp(45ch,60vw,65ch)] min-w-0 overflow-x-hidden px-4 sm:px-6 pb-20 pt-16">
+      <article
+        className="entry-content mx-auto w-full min-w-0 overflow-x-hidden px-4 sm:px-6 pb-20 pt-16"
+        style={{ maxWidth: `${articleWidth}ch` }}
+      >
         <header className="mb-4 space-y-5">
           <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground wrap-anywhere sm:text-4xl sm:leading-[1.15]">
             {entry.url && isSafeUrl(entry.url) ? (
@@ -91,6 +103,51 @@ export function EntryContentBody({
                 <span>{readingTime}</span>
               </div>
             )}
+
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setArticleWidth(articleWidth - ARTICLE_WIDTH_STEP)
+                }
+                disabled={articleWidth <= ARTICLE_WIDTH_MIN}
+                title={t("entry.decrease_width")}
+                aria-label={t("entry.decrease_width")}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-item-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg
+                  className="size-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                >
+                  <path d="M5 12h14" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setArticleWidth(articleWidth + ARTICLE_WIDTH_STEP)
+                }
+                disabled={articleWidth >= ARTICLE_WIDTH_MAX}
+                title={t("entry.increase_width")}
+                aria-label={t("entry.increase_width")}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-item-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg
+                  className="size-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </div>
           </div>
           <hr className="border-border/60" />
         </header>

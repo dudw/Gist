@@ -11,6 +11,7 @@ import { FoldersSettings } from "./tabs/FoldersSettings";
 import { AISettings } from "./tabs/AISettings";
 import { NetworkSettings } from "./tabs/NetworkSettings";
 import { AdvancedSettings } from "./tabs/AdvancedSettings";
+import { RulesSettings } from "./tabs/RulesSettings";
 import { cn } from "@/lib/utils";
 
 export type SettingsTab =
@@ -21,6 +22,7 @@ export type SettingsTab =
   | "data"
   | "feeds"
   | "folders"
+  | "rules"
   | "advanced";
 
 interface SettingsModalProps {
@@ -76,6 +78,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
         return <FeedsSettings />;
       case "folders":
         return <FoldersSettings />;
+      case "rules":
+        return <RulesSettings />;
       case "advanced":
         return <AdvancedSettings />;
       default:
@@ -99,6 +103,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
         return t("settings.subscriptions");
       case "folders":
         return t("settings.folders");
+      case "rules":
+        return t("settings.rules");
       case "advanced":
         return t("settings.advanced");
       default:
@@ -114,6 +120,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     { id: "data", label: t("settings.data") },
     { id: "feeds", label: t("settings.subscriptions") },
     { id: "folders", label: t("settings.folders") },
+    { id: "rules", label: t("settings.rules") },
     { id: "advanced", label: t("settings.advanced") },
   ];
 

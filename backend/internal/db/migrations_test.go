@@ -10,6 +10,27 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestMigrate_ArticleRulesTables(t *testing.T) {
+	database, err := sql.Open("sqlite", "file::memory:?cache=shared&_pragma=foreign_keys(1)")
+	require.NoError(t, err)
+	defer database.Close()
+
+	require.NoError(t, db.Migrate(database))
+
+	for _, table := range []string{
+		"article_rules",
+		"article_rule_conditions",
+		"article_rule_feeds",
+	} {
+		var count int
+		require.NoError(t, database.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
+			table,
+		).Scan(&count))
+		require.Equal(t, 1, count, "missing table %s", table)
+	}
+}
+
 func TestMigrate_EntryHashDeduplication_MergesHistoricalDuplicates(t *testing.T) {
 	database, err := sql.Open("sqlite", "file::memory:?cache=shared&_pragma=foreign_keys(1)")
 	require.NoError(t, err)

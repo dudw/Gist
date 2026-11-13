@@ -29,6 +29,7 @@ func TestNewRouter_RegistersRoutes(t *testing.T) {
 	aiService := mock.NewMockAIService(ctrl)
 	authService := mock.NewMockAuthService(ctrl)
 	domainRateLimitService := mock.NewMockDomainRateLimitService(ctrl)
+	ruleService := mock.NewMockRuleService(ctrl)
 	refreshService := mock.NewMockRefreshService(ctrl)
 	readabilityService := mock.NewMockReadabilityService(ctrl)
 	importTaskService := mock.NewMockImportTaskService(ctrl)
@@ -43,6 +44,7 @@ func TestNewRouter_RegistersRoutes(t *testing.T) {
 	aiHandler := handler.NewAIHandler(aiService)
 	authHandler := handler.NewAuthHandler(authService)
 	domainRateLimitHandler := handler.NewDomainRateLimitHandler(domainRateLimitService)
+	ruleHandler := handler.NewRuleHandler(ruleService)
 
 	e := gh.NewRouter(
 		folderHandler,
@@ -55,6 +57,7 @@ func TestNewRouter_RegistersRoutes(t *testing.T) {
 		aiHandler,
 		authHandler,
 		domainRateLimitHandler,
+		ruleHandler,
 		authService,
 		"",
 		true,
@@ -63,6 +66,8 @@ func TestNewRouter_RegistersRoutes(t *testing.T) {
 	require.NotNil(t, e)
 	require.True(t, hasRoute(e, http.MethodGet, "/swagger/*"))
 	require.True(t, hasRoute(e, http.MethodGet, "/api/feeds"))
+	require.True(t, hasRoute(e, http.MethodGet, "/api/rules"))
+	require.True(t, hasRoute(e, http.MethodPost, "/api/rules/:id/run"))
 	require.True(t, hasRoute(e, http.MethodGet, "/icons/:filename"))
 	require.True(t, hasRoute(e, http.MethodGet, "/api/proxy/image/:encoded"))
 }
@@ -81,6 +86,7 @@ func TestNewRouter_SwaggerDisabled(t *testing.T) {
 	aiService := mock.NewMockAIService(ctrl)
 	authService := mock.NewMockAuthService(ctrl)
 	domainRateLimitService := mock.NewMockDomainRateLimitService(ctrl)
+	ruleService := mock.NewMockRuleService(ctrl)
 	refreshService := mock.NewMockRefreshService(ctrl)
 	readabilityService := mock.NewMockReadabilityService(ctrl)
 	importTaskService := mock.NewMockImportTaskService(ctrl)
@@ -95,6 +101,7 @@ func TestNewRouter_SwaggerDisabled(t *testing.T) {
 	aiHandler := handler.NewAIHandler(aiService)
 	authHandler := handler.NewAuthHandler(authService)
 	domainRateLimitHandler := handler.NewDomainRateLimitHandler(domainRateLimitService)
+	ruleHandler := handler.NewRuleHandler(ruleService)
 
 	e := gh.NewRouter(
 		folderHandler,
@@ -107,6 +114,7 @@ func TestNewRouter_SwaggerDisabled(t *testing.T) {
 		aiHandler,
 		authHandler,
 		domainRateLimitHandler,
+		ruleHandler,
 		authService,
 		"",
 		false,
@@ -133,6 +141,7 @@ func TestNewRouter_LogoutRouteIsPublic(t *testing.T) {
 	aiService := mock.NewMockAIService(ctrl)
 	authService := mock.NewMockAuthService(ctrl)
 	domainRateLimitService := mock.NewMockDomainRateLimitService(ctrl)
+	ruleService := mock.NewMockRuleService(ctrl)
 	refreshService := mock.NewMockRefreshService(ctrl)
 	readabilityService := mock.NewMockReadabilityService(ctrl)
 	importTaskService := mock.NewMockImportTaskService(ctrl)
@@ -147,6 +156,7 @@ func TestNewRouter_LogoutRouteIsPublic(t *testing.T) {
 	aiHandler := handler.NewAIHandler(aiService)
 	authHandler := handler.NewAuthHandler(authService)
 	domainRateLimitHandler := handler.NewDomainRateLimitHandler(domainRateLimitService)
+	ruleHandler := handler.NewRuleHandler(ruleService)
 
 	e := gh.NewRouter(
 		folderHandler,
@@ -159,6 +169,7 @@ func TestNewRouter_LogoutRouteIsPublic(t *testing.T) {
 		aiHandler,
 		authHandler,
 		domainRateLimitHandler,
+		ruleHandler,
 		authService,
 		"",
 		false,
