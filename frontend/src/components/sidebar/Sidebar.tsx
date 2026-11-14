@@ -15,6 +15,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ArrowDownAZIcon, CalendarIcon } from "@/components/ui/icons";
 import { SidebarHeader } from "./SidebarHeader";
 import { FeedCategory } from "./FeedCategory";
@@ -94,6 +101,7 @@ export function Sidebar({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null);
+  const [deletingFeed, setDeletingFeed] = useState<Feed | null>(null);
   const [sortBy, setSortBy] = useState<SortBy>("name");
 
   const visibleContentTypes = useMemo(() => {
@@ -164,10 +172,19 @@ export function Sidebar({
 
   const handleDeleteFeed = useCallback(
     (feedId: string) => {
-      deleteFeed(feedId);
+      const feed = allFeeds.find((f) => f.id === feedId);
+      if (feed) {
+        setDeletingFeed(feed);
+      }
     },
-    [deleteFeed],
+    [allFeeds],
   );
+
+  const handleConfirmDeleteFeed = useCallback(() => {
+    if (!deletingFeed) return;
+    deleteFeed(deletingFeed.id);
+    setDeletingFeed(null);
+  }, [deletingFeed, deleteFeed]);
 
   const handleRefreshFeed = useCallback(
     (feedId: string) => {
@@ -474,6 +491,43 @@ export function Sidebar({
           if (!open) setEditingFeed(null);
         }}
       />
+      <Dialog
+        open={deletingFeed !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingFeed(null);
+        }}
+      >
+        <DialogContent className="max-w-md p-0">
+          <DialogHeader className="border-b border-border px-4 py-3">
+            <DialogTitle>{t("feeds.delete_confirm_title")}</DialogTitle>
+          </DialogHeader>
+          <DialogDescription className="px-4 py-4">
+            {t("feeds.delete_confirm_message", { name: deletingFeed?.title })}
+          </DialogDescription>
+          <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setDeletingFeed(null)}
+              className={cn(
+                "rounded-md px-4 py-2 text-sm font-medium transition-colors",
+                "border border-border bg-background hover:bg-muted",
+              )}
+            >
+              {t("actions.cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDeleteFeed}
+              className={cn(
+                "rounded-md px-4 py-2 text-sm font-medium transition-colors",
+                "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+              )}
+            >
+              {t("actions.delete")}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

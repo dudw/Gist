@@ -350,7 +350,9 @@
     "summary_prompt_reminder_count": "{{count}} / {{max}}",
     "summary_prompt_reminder_too_long": "The custom prompt cannot exceed {{max}} characters",
     "url_readonly": "Read-only",
-    "update_failed": "Update failed"
+    "update_failed": "Update failed",
+    "delete_confirm_title": "Delete Feed",
+    "delete_confirm_message": "Are you sure you want to delete \"{{name}}\"? All articles in this feed will also be deleted. This action cannot be undone."
   },
   "rules": {
     "add": "Add rule",

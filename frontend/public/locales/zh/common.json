@@ -350,7 +350,9 @@
     "summary_prompt_reminder_count": "{{count}} / {{max}}",
     "summary_prompt_reminder_too_long": "自定义提示词不能超过 {{max}} 个字符",
     "url_readonly": "不可修改",
-    "update_failed": "更新失败"
+    "update_failed": "更新失败",
+    "delete_confirm_title": "删除订阅",
+    "delete_confirm_message": "确定要删除「{{name}}」吗？该订阅下的所有文章也会被删除，此操作无法撤销。"
   },
   "rules": {
     "add": "新增规则",
