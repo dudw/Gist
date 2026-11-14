@@ -1,9 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+// 统一换行符，避免 Windows CRLF 检出导致多行断言失败
+function readSource(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
 describe("app shell viewport sizing", () => {
-  const appSource = readFileSync("src/App.tsx", "utf8");
-  const cssSource = readFileSync("src/index.css", "utf8");
+  const appSource = readSource("src/App.tsx");
+  const cssSource = readSource("src/index.css");
 
   it("wraps the app in a fixed-height shell", () => {
     expect(appSource).toContain('className="app-shell"');
