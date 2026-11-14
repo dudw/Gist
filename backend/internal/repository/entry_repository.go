@@ -474,7 +474,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 			return err
 		}
 		if affected, err := result.RowsAffected(); err == nil && affected > 0 {
-			return nil
+			return r.pruneDuplicateVersions(ctx, entry.FeedID, entry.Title, entry.Author)
 		}
 	}
 
@@ -504,6 +504,102 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 		boolToInt(entry.Read),
 		now,
 		now,
+	)
+	if err != nil {
+		return err
+	}
+
+	return r.pruneDuplicateVersions(ctx, entry.FeedID, entry.Title, entry.Author)
+}
+
+// pruneDuplicateVersions 删除同一订阅源内标题与作者都相同的旧版本，仅保留最新一条。
+// 最新按发布时间倒序判断，发布时间相同时使用更新时间与 ID。
+// 被删除版本的已读/加星状态会合并到保留的文章上。
+func (r *entryRepository) pruneDuplicateVersions(ctx context.Context, feedID int64, title, author *string) error {
+	if title == nil || author == nil {
+		return nil
+	}
+
+	normalizedTitle := strings.TrimSpace(*title)
+	normalizedAuthor := strings.TrimSpace(*author)
+	if normalizedTitle == "" || normalizedAuthor == "" {
+		return nil
+	}
+
+	rows, err := r.db.QueryContext(
+		ctx,
+		`SELECT id, read, starred
+		 FROM entries
+		 WHERE feed_id = ? AND TRIM(title) = ? AND TRIM(author) = ?
+		 ORDER BY COALESCE(published_at, '') DESC, updated_at DESC, id DESC`,
+		feedID,
+		normalizedTitle,
+		normalizedAuthor,
+	)
+	if err != nil {
+		return err
+	}
+
+	var keeperID int64
+	var keeperRead, keeperStarred int
+	var duplicateIDs []int64
+	first := true
+
+	for rows.Next() {
+		var id int64
+		var read, starred int
+		if err := rows.Scan(&id, &read, &starred); err != nil {
+			_ = rows.Close()
+			return err
+		}
+
+		if first {
+			keeperID = id
+			keeperRead = read
+			keeperStarred = starred
+			first = false
+			continue
+		}
+
+		duplicateIDs = append(duplicateIDs, id)
+		if read == 1 {
+			keeperRead = 1
+		}
+		if starred == 1 {
+			keeperStarred = 1
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+
+	if len(duplicateIDs) == 0 {
+		return nil
+	}
+
+	if _, err := r.db.ExecContext(
+		ctx,
+		`UPDATE entries SET read = ?, starred = ? WHERE id = ?`,
+		keeperRead,
+		keeperStarred,
+		keeperID,
+	); err != nil {
+		return err
+	}
+
+	placeholders := make([]string, len(duplicateIDs))
+	args := make([]interface{}, len(duplicateIDs))
+	for i, id := range duplicateIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	_, err = r.db.ExecContext(
+		ctx,
+		`DELETE FROM entries WHERE id IN (`+strings.Join(placeholders, ",")+`)`,
+		args...,
 	)
 	return err
 }
