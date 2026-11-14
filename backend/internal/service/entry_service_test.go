@@ -48,6 +48,27 @@ func TestEntryService_List_Success(t *testing.T) {
 	require.Len(t, entries, 2)
 }
 
+func TestEntryService_List_PassesSearchKeyword(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockEntries := mock.NewMockEntryRepository(ctrl)
+	mockFeeds := mock.NewMockFeedRepository(ctrl)
+	mockFolders := mock.NewMockFolderRepository(ctrl)
+	svc := service.NewEntryService(mockEntries, mockFeeds, mockFolders)
+	ctx := context.Background()
+
+	mockEntries.EXPECT().
+		List(ctx, repository.EntryListFilter{
+			Search: "并发",
+			Limit:  50,
+		}).
+		Return([]model.Entry{}, nil)
+
+	_, err := svc.List(ctx, service.EntryListParams{Search: "并发"})
+	require.NoError(t, err)
+}
+
 func TestEntryService_List_WithFeedID(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

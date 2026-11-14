@@ -66,6 +66,19 @@ export function parseRoute(pathname: string, search: string): RouteState {
     };
   }
 
+  // /search/:entryId?q=...
+  if (segments[0] === "search") {
+    return {
+      selection: {
+        type: "search",
+        query: (params.get("q") ?? "").trim(),
+      },
+      entryId: segments[1] || null,
+      unreadOnly,
+      contentType,
+    };
+  }
+
   // Fallback to all
   return {
     selection: { type: "all" },
@@ -103,9 +116,15 @@ export function buildPath(
     case "starred":
       path = entryId ? `/starred/${entryId}` : "/starred";
       break;
+    case "search":
+      path = entryId ? `/search/${entryId}` : "/search";
+      break;
   }
 
   const params = new URLSearchParams();
+  if (selection.type === "search" && selection.query) {
+    params.set("q", selection.query);
+  }
   if (unreadOnly) {
     params.set("unread", "true");
   }

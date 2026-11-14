@@ -53,6 +53,8 @@ function getSelectionKey(selection: SelectionType): string {
     case "all":
     case "starred":
       return selection.type;
+    case "search":
+      return `search:${selection.query}`;
   }
 }
 
@@ -287,6 +289,10 @@ export function PictureMasonry({
         );
       case "starred":
         return t("entry_list.starred");
+      case "search":
+        return selection.query
+          ? t("search.results_title", { query: selection.query })
+          : t("search.title");
     }
   }, [selection, feedsMap, foldersMap, t]);
 
@@ -307,6 +313,8 @@ export function PictureMasonry({
           )
           .reduce((sum, f) => sum + (counts[f.id] ?? 0), 0);
       case "starred":
+        return 0;
+      case "search":
         return 0;
     }
   }, [unreadCounts, selection, feeds, contentType]);

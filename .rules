@@ -36,6 +36,7 @@
 **数据库特殊限制**：
 - `modernc.org/sqlite` 不支持 FTS5 特殊删除语法 `INSERT INTO fts(fts, ...) VALUES('delete', ...)`
 - 必须使用 `DELETE FROM fts WHERE rowid = ?`
+- 文章搜索：`entries.search_text` 保存「标题 + 去 HTML 正文」的纯文本，`entries_fts` 是基于它的 trigram FTS5 索引，由 INSERT/UPDATE/DELETE 触发器同步；新增文章写入路径时必须同时维护 `search_text`
 
 **安全防御**：
 - Handler 层必须校验所有 Query/Body/Path 参数

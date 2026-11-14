@@ -426,6 +426,15 @@
     "view_all": "View All Articles",
     "show_unread_only": "Show Unread Only"
   },
+  "search": {
+    "title": "Search Articles",
+    "results_title": "Search: {{query}}",
+    "placeholder": "Search titles or content",
+    "open": "Search articles",
+    "cancel": "Cancel",
+    "clear": "Clear search",
+    "no_results": "No matching articles"
+  },
   "update": {
     "available": "Update Available",
     "description": "Click to refresh and apply the update"

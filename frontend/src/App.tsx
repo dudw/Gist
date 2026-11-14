@@ -135,6 +135,8 @@ function AuthenticatedApp() {
     selectFeed,
     selectFolder,
     selectStarred,
+    selectSearch,
+    exitSearch,
     selectedEntryId,
     selectEntry,
     unreadOnly,
@@ -380,6 +382,8 @@ function AuthenticatedApp() {
               isMobile
               isActive={mobileView === "list"}
               onMenuClick={openSidebar}
+              onSearch={selectSearch}
+              onExitSearch={exitSearch}
             />
           </section>
           {/* Detail remains an internal scroller and slides over the document list. */}
@@ -476,6 +480,8 @@ function AuthenticatedApp() {
             isTablet={isTablet}
             onToggleSidebar={toggleSidebarVisible}
             sidebarVisible={sidebarVisible}
+            onSearch={selectSearch}
+            onExitSearch={exitSearch}
           />
         }
         content={entryContent}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gist/backend/internal/hashutil"
+	"gist/backend/internal/searchtext"
 	"gist/backend/internal/urlutil"
 )
 
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS entries (
   title TEXT,
   url TEXT,
   content TEXT,
+  search_text TEXT NOT NULL DEFAULT '',
   author TEXT,
   published_at TEXT,
   created_at TEXT NOT NULL,
@@ -55,28 +57,40 @@ CREATE TABLE IF NOT EXISTS entries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_entries_feed_id ON entries(feed_id);
+`
 
+// entrySearchFTSSchema 定义文章搜索用的 FTS5 索引。
+// 使用 trigram 分词以支持中英文子串匹配，内容来自去 HTML 的 search_text。
+const entrySearchFTSSchema = `
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
   title,
-  content,
-  author,
-  url,
-  tokenize = 'unicode61'
+  search_text,
+  tokenize = 'trigram'
 );
+`
 
+const entrySearchTriggersSchema = `
 CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
-  INSERT INTO entries_fts(rowid, title, content, author, url)
-  VALUES (new.id, new.title, new.content, new.author, new.url);
+  INSERT INTO entries_fts(rowid, title, search_text)
+  VALUES (new.id, COALESCE(new.title, ''), new.search_text);
 END;
 
 CREATE TRIGGER IF NOT EXISTS entries_ad AFTER DELETE ON entries BEGIN
   DELETE FROM entries_fts WHERE rowid = old.id;
 END;
+
+CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE OF title, search_text ON entries
+WHEN old.title IS NOT new.title OR old.search_text IS NOT new.search_text
+BEGIN
+  DELETE FROM entries_fts WHERE rowid = old.id;
+  INSERT INTO entries_fts(rowid, title, search_text)
+  VALUES (new.id, COALESCE(new.title, ''), new.search_text);
+END;
 `
 
 func Migrate(db *sql.DB) error {
-	// Run base schema first (without read column)
-	if _, err := db.Exec(baseSchema); err != nil {
+	// Run base schema first (without incremental columns)
+	if _, err := db.Exec(baseSchema + entrySearchFTSSchema + entrySearchTriggersSchema); err != nil {
 		return fmt.Errorf("migrate base schema: %w", err)
 	}
 
@@ -393,7 +407,216 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("create idx_article_rule_feeds_feed: %w", err)
 	}
 
+	// Migration 22: Entry full-text search (search_text column + trigram FTS index).
+	if err := migrateEntrySearch(db); err != nil {
+		return fmt.Errorf("migrate entry search: %w", err)
+	}
+
 	return nil
+}
+
+// migrateEntrySearch 为文章搜索补齐 search_text 列、trigram FTS 索引与同步触发器。
+// 旧版 entries_fts 使用 unicode61 且直接索引 HTML 内容，无法满足中文与纯文本搜索，
+// 因此首次升级时整体重建索引并回填历史数据。
+func migrateEntrySearch(db *sql.DB) error {
+	hasSearchText, err := hasColumn(db, "entries", "search_text")
+	if err != nil {
+		return fmt.Errorf("check search_text column: %w", err)
+	}
+	if !hasSearchText {
+		if _, err := db.Exec(`ALTER TABLE entries ADD COLUMN search_text TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add search_text column: %w", err)
+		}
+	}
+
+	ftsReady, err := hasColumn(db, "entries_fts", "search_text")
+	if err != nil {
+		return fmt.Errorf("check entries_fts schema: %w", err)
+	}
+
+	if !ftsReady {
+		for _, trigger := range []string{"entries_ai", "entries_ad", "entries_au"} {
+			if _, err := db.Exec(`DROP TRIGGER IF EXISTS ` + trigger); err != nil {
+				return fmt.Errorf("drop %s trigger: %w", trigger, err)
+			}
+		}
+		if _, err := db.Exec(`DROP TABLE IF EXISTS entries_fts`); err != nil {
+			return fmt.Errorf("drop entries_fts: %w", err)
+		}
+		if _, err := db.Exec(entrySearchFTSSchema); err != nil {
+			return fmt.Errorf("create entries_fts: %w", err)
+		}
+		if err := backfillEntrySearchText(db); err != nil {
+			return err
+		}
+		if err := rebuildEntrySearchIndex(db); err != nil {
+			return err
+		}
+	} else {
+		// 异常中断后的恢复路径：补回缺失的搜索文本，并在索引不完整时重建
+		needsBackfill, err := entrySearchNeedsBackfill(db)
+		if err != nil {
+			return err
+		}
+		indexIncomplete, err := entrySearchIndexIncomplete(db)
+		if err != nil {
+			return err
+		}
+		if needsBackfill || indexIncomplete {
+			if needsBackfill {
+				if err := backfillEntrySearchText(db); err != nil {
+					return err
+				}
+			}
+			if err := rebuildEntrySearchIndex(db); err != nil {
+				return err
+			}
+		}
+	}
+
+	return recreateEntrySearchTriggers(db)
+}
+
+// entrySearchIndexIncomplete 判断 FTS 索引行数是否与文章总数不一致。
+func entrySearchIndexIncomplete(db *sql.DB) (bool, error) {
+	var entryCount, indexCount int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&entryCount); err != nil {
+		return false, fmt.Errorf("count entries: %w", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM entries_fts`).Scan(&indexCount); err != nil {
+		return false, fmt.Errorf("count entries_fts: %w", err)
+	}
+	return entryCount != indexCount, nil
+}
+
+// entrySearchNeedsBackfill 判断是否还有带标题或正文但缺少搜索文本的文章。
+func entrySearchNeedsBackfill(db *sql.DB) (bool, error) {
+	var exists int
+	err := db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM entries
+			WHERE search_text = ''
+			  AND (
+			    (title IS NOT NULL AND TRIM(title) <> '')
+			    OR (content IS NOT NULL AND TRIM(content) <> '')
+			  )
+			LIMIT 1
+		)`).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check entry search backfill: %w", err)
+	}
+	return exists == 1, nil
+}
+
+// rebuildEntrySearchIndex 全量重建文章搜索索引。
+func rebuildEntrySearchIndex(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin entries_fts rebuild tx: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM entries_fts`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("clear entries_fts: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO entries_fts(rowid, title, search_text)
+		SELECT id, COALESCE(title, ''), search_text FROM entries`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("rebuild entries_fts: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit entries_fts rebuild tx: %w", err)
+	}
+	return nil
+}
+
+// recreateEntrySearchTriggers 重建搜索相关的触发器，保证定义与当前索引结构一致。
+func recreateEntrySearchTriggers(db *sql.DB) error {
+	for _, trigger := range []string{"entries_ai", "entries_ad", "entries_au"} {
+		if _, err := db.Exec(`DROP TRIGGER IF EXISTS ` + trigger); err != nil {
+			return fmt.Errorf("drop %s trigger: %w", trigger, err)
+		}
+	}
+	if _, err := db.Exec(entrySearchTriggersSchema); err != nil {
+		return fmt.Errorf("create entry search triggers: %w", err)
+	}
+	return nil
+}
+
+// backfillEntrySearchText 按 id 分批回填历史文章的搜索文本。
+func backfillEntrySearchText(db *sql.DB) error {
+	const batchSize = 500
+
+	lastID := int64(0)
+	for {
+		rows, err := db.Query(
+			`SELECT id, title, content FROM entries WHERE id > ? ORDER BY id LIMIT ?`,
+			lastID,
+			batchSize,
+		)
+		if err != nil {
+			return fmt.Errorf("query entries for search backfill: %w", err)
+		}
+
+		type entryRecord struct {
+			id      int64
+			title   sql.NullString
+			content sql.NullString
+		}
+
+		records := make([]entryRecord, 0, batchSize)
+		for rows.Next() {
+			var record entryRecord
+			if err := rows.Scan(&record.id, &record.title, &record.content); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("scan entry for search backfill: %w", err)
+			}
+			records = append(records, record)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("iterate entries for search backfill: %w", err)
+		}
+		_ = rows.Close()
+
+		if len(records) == 0 {
+			return nil
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin search backfill tx: %w", err)
+		}
+		for _, record := range records {
+			searchText := searchtext.Build(
+				nullStringPtr(record.title),
+				nullStringPtr(record.content),
+			)
+			if _, err := tx.Exec(
+				`UPDATE entries SET search_text = ? WHERE id = ?`,
+				searchText,
+				record.id,
+			); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("backfill search_text: %w", err)
+			}
+			lastID = record.id
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit search backfill tx: %w", err)
+		}
+
+		if len(records) < batchSize {
+			return nil
+		}
+	}
+}
+
+func nullStringPtr(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	result := value.String
+	return &result
 }
 
 type dedupeEntry struct {

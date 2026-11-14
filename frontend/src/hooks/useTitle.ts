@@ -8,7 +8,7 @@ interface BuildTitleParams {
   entryTitle?: string | null;
   feedsMap: Map<string, Feed>;
   foldersMap: Map<string, Folder>;
-  t: (key: string) => string;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }
 
 /**
@@ -41,6 +41,10 @@ export function buildTitle({
     }
     case "starred":
       return `${t("entry_list.starred")} | Gist`;
+    case "search":
+      return selection.query
+        ? `${t("search.results_title", { query: selection.query })} | Gist`
+        : `${t("search.title")} | Gist`;
     default:
       return "Gist";
   }

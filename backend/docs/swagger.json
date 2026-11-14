@@ -632,6 +632,12 @@
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Search keyword in title or content (max 100 characters)",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Limit the number of entries (default 50)",
                         "name": "limit",

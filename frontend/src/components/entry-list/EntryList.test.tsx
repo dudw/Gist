@@ -1291,6 +1291,36 @@ describe("EntryList read visibility", () => {
     });
   });
 
+  it("未读模式下标记此区域为已读不立即刷新列表", () => {
+    setUISetting("hideReadEntries", true);
+
+    render(<EntryList {...defaultProps} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "entry_list.mark_area_read" }),
+    );
+
+    expect(mockMarkManyAsRead).toHaveBeenCalledWith({
+      ids: ["1", "2", "3", "4", "5"],
+      read: true,
+      skipInvalidate: true,
+    });
+  });
+
+  it("未读模式下批量标记范围已读不立即刷新列表", () => {
+    setUISetting("hideReadEntries", true);
+
+    render(<EntryList {...defaultProps} />);
+
+    fireEvent.click(screen.getByTestId("mark-above-3"));
+
+    expect(mockMarkManyAsRead).toHaveBeenCalledWith({
+      ids: ["1", "2"],
+      read: true,
+      skipInvalidate: true,
+    });
+  });
+
   it("未读模式下列表为空时显示未读空状态和操作按钮", () => {
     setUISetting("hideReadEntries", true);
     vi.mocked(useEntriesInfinite).mockReturnValue({
@@ -1308,5 +1338,85 @@ describe("EntryList read visibility", () => {
     expect(
       screen.getByRole("button", { name: "entry_list.view_all" }),
     ).toBeTruthy();
+  });
+});
+
+describe("EntryList search", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    entryListScrollPositions.clear();
+    setUISetting("hideReadEntries", false);
+    mockRenderedEntryListItem.mockReset();
+    vi.mocked(useGeneralSettings).mockReturnValue({
+      data: { markReadOnScroll: false },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    vi.mocked(useAISettings).mockReturnValue({
+      data: { autoTranslate: false, summaryLanguage: "zh-CN" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    vi.mocked(useEntriesInfinite).mockReturnValue({
+      data: { pages: [{ entries: allEntries, hasMore: false }] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+  });
+
+  afterEach(() => {
+    cleanup();
+    setUISetting("hideReadEntries", false);
+    vi.useRealTimers();
+  });
+
+  it("搜索视图按关键词请求列表", () => {
+    render(
+      <EntryList
+        {...defaultProps}
+        selection={{ type: "search", query: "并发" }}
+      />,
+    );
+
+    expect(vi.mocked(useEntriesInfinite)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ q: "并发", unreadOnly: false }),
+    );
+  });
+
+  it("搜索视图不受全局不显示已读影响", () => {
+    setUISetting("hideReadEntries", true);
+
+    render(
+      <EntryList
+        {...defaultProps}
+        selection={{ type: "search", query: "并发" }}
+      />,
+    );
+
+    expect(vi.mocked(useEntriesInfinite)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ q: "并发", unreadOnly: false }),
+    );
+  });
+
+  it("搜索无结果时显示搜索空状态", () => {
+    vi.mocked(useEntriesInfinite).mockReturnValue({
+      data: { pages: [] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isLoading: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    render(
+      <EntryList
+        {...defaultProps}
+        selection={{ type: "search", query: "不存在" }}
+      />,
+    );
+
+    expect(screen.getByText("search.no_results")).toBeTruthy();
   });
 });

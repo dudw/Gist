@@ -53,6 +53,8 @@ interface EntryListProps {
   onToggleSidebar?: () => void;
   sidebarVisible?: boolean;
   isActive?: boolean;
+  onSearch?: (query: string) => void;
+  onExitSearch?: () => void;
 }
 
 const KEYBOARD_NAVIGATION_IGNORE_SELECTOR = [
@@ -109,11 +111,15 @@ export function EntryList({
   onToggleSidebar,
   sidebarVisible,
   isActive = true,
+  onSearch,
+  onExitSearch,
 }: EntryListProps) {
   "use no memo";
 
   const { t } = useTranslation();
   const params = selectionToParams(selection, contentType);
+  const isSearch = selection.type === "search";
+  const searchQuery = selection.type === "search" ? selection.query : "";
   const containerRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const listWrapperRef = useRef<HTMLDivElement>(null);
@@ -156,14 +162,20 @@ export function EntryList({
     value: boolean;
   }>({ key: "", value: false });
   const showAllOverride = showAllView.key === viewKey && showAllView.value;
-  const unreadMode = (unreadOnly || hideReadEntries) && !showAllOverride;
+  // 搜索视图默认展示全部命中，不受全局「不显示已读」影响
+  const unreadMode =
+    (unreadOnly || (hideReadEntries && !isSearch)) && !showAllOverride;
   const setShowAllOverride = useCallback(
     (value: boolean) => setShowAllView({ key: viewKey, value }),
     [viewKey],
   );
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
-    useEntriesInfinite({ ...params, unreadOnly: unreadMode });
+    useEntriesInfinite({
+      ...params,
+      unreadOnly: unreadMode,
+      ...(searchQuery ? { q: searchQuery } : {}),
+    });
 
   // Swipe gesture: Right swipe opens sidebar (only on mobile)
   useSwipeGesture(listWrapperRef, {
@@ -280,8 +292,13 @@ export function EntryList({
 
   const handleMarkAreaRead = useCallback(() => {
     if (unreadEntryIds.length === 0) return;
-    markManyAsRead({ ids: unreadEntryIds, read: true });
-  }, [markManyAsRead, unreadEntryIds]);
+    // 未读模式下不立即刷新列表，已读条目保留到切换订阅源后重新请求时才隐藏
+    markManyAsRead({
+      ids: unreadEntryIds,
+      read: true,
+      ...(unreadMode ? { skipInvalidate: true } : {}),
+    });
+  }, [markManyAsRead, unreadEntryIds, unreadMode]);
 
   const handleToggleUnreadMode = useCallback(() => {
     if (unreadMode) {
@@ -309,9 +326,13 @@ export function EntryList({
         .map((entry) => entry.id);
       if (ids.length === 0) return;
 
-      markManyAsRead({ ids, read: true });
+      markManyAsRead({
+        ids,
+        read: true,
+        ...(unreadMode ? { skipInvalidate: true } : {}),
+      });
     },
-    [entries, markManyAsRead],
+    [entries, markManyAsRead, unreadMode],
   );
 
   const handleAddRule = useCallback((feedId: string) => {
@@ -534,8 +555,12 @@ export function EntryList({
         );
       case "starred":
         return t("entry_list.starred");
+      case "search":
+        return searchQuery
+          ? t("search.results_title", { query: searchQuery })
+          : t("search.title");
     }
-  }, [selection, contentType, feedsMap, foldersMap, t]);
+  }, [selection, contentType, feedsMap, foldersMap, t, searchQuery]);
 
   // Calculate unread count from API data (not from loaded entries)
   const unreadCount = useMemo(() => {
@@ -558,6 +583,8 @@ export function EntryList({
           .reduce((sum, f) => sum + (counts[f.id] ?? 0), 0);
       case "starred":
         return 0; // Starred view doesn't show unread count
+      case "search":
+        return 0; // Search results don't show unread count
     }
   }, [unreadCounts, selection, feeds, contentType]);
 
@@ -576,6 +603,7 @@ export function EntryList({
         testId="entry-list-header"
       >
         <EntryListHeader
+          key={isSearch ? "search" : "browse"}
           title={title}
           unreadCount={unreadCount}
           unreadOnly={unreadMode}
@@ -587,6 +615,10 @@ export function EntryList({
           isTablet={isTablet}
           onToggleSidebar={onToggleSidebar}
           sidebarVisible={sidebarVisible}
+          searchQuery={searchQuery}
+          onSearch={onSearch}
+          onExitSearch={onExitSearch}
+          hideMarkAllRead={isSearch}
         />
       </MobileDocumentHeader>
 
@@ -612,6 +644,7 @@ export function EntryList({
           ) : entries.length === 0 ? (
             <EntryListEmpty
               unreadMode={unreadMode}
+              isSearch={isSearch}
               footer={
                 <EntryListFooter
                   unreadCount={0}
@@ -642,6 +675,7 @@ export function EntryList({
                   showSummary={showEntrySummary}
                   autoTranslate={autoTranslate}
                   targetLanguage={targetLanguage}
+                  searchQuery={isSearch ? searchQuery : undefined}
                 />
               ))}
               <EntryListFooter
@@ -698,16 +732,22 @@ function EntryListSkeleton() {
 
 function EntryListEmpty({
   unreadMode,
+  isSearch,
   footer,
 }: {
   unreadMode: boolean;
+  isSearch?: boolean;
   footer: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 text-center text-sm text-muted-foreground">
       <div>
-        {unreadMode ? t("entry_list.no_unread") : t("entry_list.no_articles")}
+        {unreadMode
+          ? t("entry_list.no_unread")
+          : isSearch
+            ? t("search.no_results")
+            : t("entry_list.no_articles")}
       </div>
       {footer}
     </div>

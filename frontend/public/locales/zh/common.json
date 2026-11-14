@@ -426,6 +426,15 @@
     "view_all": "查看全部文章",
     "show_unread_only": "只看未读"
   },
+  "search": {
+    "title": "搜索文章",
+    "results_title": "搜索：{{query}}",
+    "placeholder": "搜索标题或内容",
+    "open": "搜索文章",
+    "cancel": "取消",
+    "clear": "清除搜索",
+    "no_results": "没有找到相关文章"
+  },
   "update": {
     "available": "发现新版本",
     "description": "点击刷新以应用更新"

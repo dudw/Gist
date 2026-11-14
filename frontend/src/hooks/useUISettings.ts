@@ -12,6 +12,7 @@ interface UISettings {
 const STORAGE_KEY = "gist-ui-settings";
 
 export const ARTICLE_WIDTH_MIN = 45;
+// 实际宽度上限由内容区宽度动态计算，此值仅作为测量不可用时的后备上限
 export const ARTICLE_WIDTH_MAX = 100;
 export const ARTICLE_WIDTH_STEP = 5;
 
@@ -107,10 +108,8 @@ export function useUISettingActions() {
   }, []);
 
   const setArticleWidth = useCallback((width: number) => {
-    const clamped = Math.min(
-      ARTICLE_WIDTH_MAX,
-      Math.max(ARTICLE_WIDTH_MIN, Math.round(width)),
-    );
+    // 上限由阅读区实际能容纳的字符宽度决定，这里只限制下限
+    const clamped = Math.max(ARTICLE_WIDTH_MIN, Math.round(width));
     setUISetting("articleWidth", clamped);
   }, []);
 

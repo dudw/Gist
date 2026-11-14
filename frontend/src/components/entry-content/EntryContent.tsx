@@ -1,11 +1,6 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  useEntry,
-  useMarkAsRead,
-  useMarkAsStarred,
-  useRemoveFromUnreadList,
-} from "@/hooks/useEntries";
+import { useEntry, useMarkAsRead, useMarkAsStarred } from "@/hooks/useEntries";
 import { useAISettings } from "@/hooks/useAISettings";
 import { useGeneralSettings } from "@/hooks/useGeneralSettings";
 import { useEntryContentScroll } from "@/hooks/useEntryContentScroll";
@@ -29,13 +24,9 @@ export function EntryContent({ entryId, isMobile, onBack }: EntryContentProps) {
   const { data: generalSettings } = useGeneralSettings();
   const { mutate: markAsRead } = useMarkAsRead();
   const { mutate: markAsStarred } = useMarkAsStarred();
-  const removeFromUnreadList = useRemoveFromUnreadList();
   const { scrollRef, isAtTop, scrollNode } = useEntryContentScroll(entryId);
 
   useScrollToTop(scrollNode, "entrycontent");
-
-  // Track entries marked as read to trigger list removal on switch
-  const markedAsReadRef = useRef<Set<string>>(new Set());
 
   const autoTranslate = aiSettings?.autoTranslate ?? false;
   const targetLanguage = aiSettings?.summaryLanguage ?? "zh-CN";
@@ -78,26 +69,13 @@ export function EntryContent({ entryId, isMobile, onBack }: EntryContentProps) {
     targetLanguage,
   });
 
-  // Mark as read when entry is loaded
-  // Use skipInvalidate to prevent list item from disappearing immediately
+  // 阅读时标记为已读，但不立即刷新列表：
+  // 已读条目保留在未读列表中，直到切换订阅源重新请求时才隐藏
   useEffect(() => {
     if (entry && !entry.read) {
-      markedAsReadRef.current.add(entry.id);
       markAsRead({ id: entry.id, read: true, skipInvalidate: true });
     }
   }, [entry, markAsRead]);
-
-  // Remove read entries from unreadOnly list when component unmounts (switching articles)
-  // Note: EntryContent uses key={entryId} in App.tsx, so it unmounts/remounts on switch
-  useEffect(() => {
-    const markedAsReadSet = markedAsReadRef.current;
-    return () => {
-      if (markedAsReadSet.size > 0) {
-        removeFromUnreadList(markedAsReadSet);
-        markedAsReadSet.clear();
-      }
-    };
-  }, [removeFromUnreadList]);
 
   const handleToggleStarred = useCallback(() => {
     if (entry) {

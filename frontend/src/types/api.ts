@@ -64,6 +64,7 @@ export interface EntryListParams {
   unreadOnly?: boolean;
   starredOnly?: boolean;
   hasThumbnail?: boolean;
+  q?: string;
   limit?: number;
   offset?: number;
 }

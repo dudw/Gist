@@ -84,6 +84,101 @@ describe("EntryContentBody", () => {
     expect(container.querySelector("article")?.style.maxWidth).toBe("80ch");
   });
 
+  it("fills the content area when the width reaches the maximum", () => {
+    mockArticleWidth.value = 100;
+    const { container } = render(
+      <EntryContentBody
+        entry={entry}
+        scrollRef={vi.fn()}
+        displayContent={entry.content}
+      />,
+    );
+
+    expect(container.querySelector("article")?.style.maxWidth).toBe("100%");
+  });
+
+  it("uses the content area width as the dynamic maximum", () => {
+    const spanOffsetWidth = Object.getOwnPropertyDescriptor(
+      HTMLSpanElement.prototype,
+      "offsetWidth",
+    );
+    const divClientWidth = Object.getOwnPropertyDescriptor(
+      HTMLDivElement.prototype,
+      "clientWidth",
+    );
+
+    try {
+      Object.defineProperty(HTMLSpanElement.prototype, "offsetWidth", {
+        configurable: true,
+        get: () => 800,
+      });
+      Object.defineProperty(HTMLDivElement.prototype, "clientWidth", {
+        configurable: true,
+        get() {
+          return this.classList?.contains("entry-content-viewport")
+            ? 1200
+            : 0;
+        },
+      });
+
+      mockArticleWidth.value = 95;
+      const { container, unmount } = render(
+        <EntryContentBody
+          entry={entry}
+          scrollRef={vi.fn()}
+          displayContent={entry.content}
+        />,
+      );
+
+      // 95ch 只占内容区的一部分，仍按 5ch 逐级调整
+      expect(container.querySelector("article")?.style.maxWidth).toBe("95ch");
+      fireEvent.click(
+        screen.getByRole("button", { name: "entry.increase_width" }),
+      );
+      expect(mockSetArticleWidth).toHaveBeenCalledWith(100);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "entry.decrease_width" }),
+      );
+      expect(mockSetArticleWidth).toHaveBeenCalledWith(90);
+
+      unmount();
+      mockArticleWidth.value = 150;
+      const fullWidthRender = render(
+        <EntryContentBody
+          entry={entry}
+          scrollRef={vi.fn()}
+          displayContent={entry.content}
+        />,
+      );
+
+      expect(
+        fullWidthRender.container.querySelector("article")?.style.maxWidth,
+      ).toBe("100%");
+    } finally {
+      if (spanOffsetWidth) {
+        Object.defineProperty(
+          HTMLSpanElement.prototype,
+          "offsetWidth",
+          spanOffsetWidth,
+        );
+      } else {
+        delete (HTMLSpanElement.prototype as { offsetWidth?: number })
+          .offsetWidth;
+      }
+      if (divClientWidth) {
+        Object.defineProperty(
+          HTMLDivElement.prototype,
+          "clientWidth",
+          divClientWidth,
+        );
+      } else {
+        delete (HTMLDivElement.prototype as { clientWidth?: number })
+          .clientWidth;
+      }
+    }
+  });
+
   it("increases and decreases the article width", () => {
     mockArticleWidth.value = 80;
     render(

@@ -201,3 +201,86 @@ func TestMigrate_EntryHashDeduplication_MergesHistoricalDuplicates(t *testing.T)
 	err = db.Migrate(database)
 	require.NoError(t, err)
 }
+
+func TestMigrate_EntrySearchRebuildsLegacyFTS(t *testing.T) {
+	database, err := sql.Open("sqlite", "file::memory:?cache=shared&_pragma=foreign_keys(1)")
+	require.NoError(t, err)
+	defer database.Close()
+
+	// 旧版数据库：没有 search_text，FTS 索引直接建在 HTML 内容上
+	_, err = database.Exec(`
+		CREATE TABLE feeds (
+			id INTEGER PRIMARY KEY,
+			folder_id INTEGER,
+			title TEXT NOT NULL,
+			url TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+
+		CREATE TABLE entries (
+			id INTEGER PRIMARY KEY,
+			feed_id INTEGER NOT NULL,
+			title TEXT,
+			url TEXT,
+			content TEXT,
+			author TEXT,
+			published_at TEXT,
+			read INTEGER NOT NULL DEFAULT 0,
+			starred INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+
+		CREATE VIRTUAL TABLE entries_fts USING fts5(
+			title, content, author, url, tokenize = 'unicode61'
+		);
+
+		CREATE TRIGGER entries_ai AFTER INSERT ON entries BEGIN
+			INSERT INTO entries_fts(rowid, title, content, author, url)
+			VALUES (new.id, new.title, new.content, new.author, new.url);
+		END;
+	`)
+	require.NoError(t, err)
+
+	_, err = database.Exec(`
+		INSERT INTO feeds (id, title, url, created_at, updated_at)
+		VALUES (1, 'feed', 'https://example.com/rss', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z');
+
+		INSERT INTO entries (id, feed_id, title, url, content, author, published_at, read, starred, created_at, updated_at)
+		VALUES (1, 1, '历史标题', 'https://example.com/entry', '<p>正文里的流星雨现象</p>', NULL, '2025-01-01T00:00:00Z', 0, 0, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z');
+	`)
+	require.NoError(t, err)
+
+	require.NoError(t, db.Migrate(database))
+
+	var searchText string
+	require.NoError(t, database.QueryRow(`SELECT search_text FROM entries WHERE id = 1`).Scan(&searchText))
+	require.Contains(t, searchText, "历史标题")
+	require.Contains(t, searchText, "正文里的流星雨现象")
+	require.NotContains(t, searchText, "<p>")
+
+	var ftsColumnCount int
+	require.NoError(t, database.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('entries_fts') WHERE name = 'search_text'`,
+	).Scan(&ftsColumnCount))
+	require.Equal(t, 1, ftsColumnCount)
+
+	var matchCount int
+	require.NoError(t, database.QueryRow(
+		`SELECT COUNT(*) FROM entries_fts WHERE entries_fts MATCH '"流星雨"'`,
+	).Scan(&matchCount))
+	require.Equal(t, 1, matchCount)
+
+	// 新写入的数据通过触发器同步到索引
+	_, err = database.Exec(`
+		INSERT INTO entries (id, feed_id, title, url, content, search_text, author, published_at, read, starred, created_at, updated_at)
+		VALUES (2, 1, '新文章', 'https://example.com/new', '<p>trigger body</p>', '新文章 trigger body', NULL, '2025-01-02T00:00:00Z', 0, 0, '2025-01-02T00:00:00Z', '2025-01-02T00:00:00Z');
+	`)
+	require.NoError(t, err)
+
+	require.NoError(t, database.QueryRow(
+		`SELECT COUNT(*) FROM entries_fts WHERE entries_fts MATCH '"trigger body"'`,
+	).Scan(&matchCount))
+	require.Equal(t, 1, matchCount)
+}

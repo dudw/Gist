@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/date-utils";
 import { stripHtml } from "@/lib/html-utils";
+import { buildSearchSnippet, splitByTerms } from "@/lib/search-highlight";
 import { useTranslationStore } from "@/stores/translation-store";
 import { FeedIcon } from "@/components/ui/feed-icon";
 import {
@@ -27,6 +28,7 @@ interface EntryListItemProps {
   showSummary?: boolean;
   autoTranslate?: boolean;
   targetLanguage?: string;
+  searchQuery?: string;
   style?: React.CSSProperties;
   "data-index"?: number;
   "data-entry-id"?: string;
@@ -45,6 +47,7 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
       showSummary = true,
       autoTranslate,
       targetLanguage,
+      searchQuery,
       style,
       "data-index": dataIndex,
       "data-entry-id": dataEntryId,
@@ -66,14 +69,24 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
         : undefined,
     );
 
-    const strippedContent = useMemo(
-      () => (entry.content ? stripHtml(entry.content).slice(0, 150) : null),
+    const plainContent = useMemo(
+      () => (entry.content ? stripHtml(entry.content) : null),
       [entry.content],
     );
 
+    const searchSnippet = useMemo(
+      () =>
+        searchQuery ? buildSearchSnippet(plainContent, searchQuery) : null,
+      [plainContent, searchQuery],
+    );
+
     const displayTitle = translation?.title ?? entry.title;
+    const fallbackSummary = plainContent ? plainContent.slice(0, 150) : null;
+    // 搜索时优先展示包含命中词的原文片段
     const displaySummary = showSummary
-      ? (translation?.summary ?? strippedContent)
+      ? searchQuery
+        ? (searchSnippet ?? translation?.summary ?? fallbackSummary)
+        : (translation?.summary ?? fallbackSummary)
       : null;
     const displayFeedName = feed?.title || fallbackFeedName;
     const titleContainsUrl = URL_PATTERN.test(displayTitle ?? "");
@@ -123,7 +136,10 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
             !displaySummary && "pr-10",
           )}
         >
-          {displayTitle || fallbackTitle}
+          <HighlightedText
+            text={displayTitle || fallbackTitle}
+            query={searchQuery}
+          />
         </div>
 
         {/* Line 3: summary */}
@@ -134,7 +150,10 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
               summaryContainsUrl ? "line-clamp-3" : "line-clamp-2",
             )}
           >
-            {displaySummary}
+            <HighlightedText
+              text={displaySummary}
+              query={searchQuery}
+            />
           </div>
         )}
 
@@ -181,3 +200,27 @@ export const EntryListItem = forwardRef<HTMLDivElement, EntryListItemProps>(
     );
   },
 );
+
+function HighlightedText({ text, query }: { text: string; query?: string }) {
+  if (!query) return <>{text}</>;
+
+  const segments = splitByTerms(text, query);
+  if (!segments.some((segment) => segment.match)) return <>{text}</>;
+
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.match ? (
+          <mark
+            key={index}
+            className="rounded-sm bg-primary/15 px-0.5 text-inherit"
+          >
+            {segment.text}
+          </mark>
+        ) : (
+          <span key={index}>{segment.text}</span>
+        ),
+      )}
+    </>
+  );
+}

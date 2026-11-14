@@ -12,6 +12,7 @@ import (
 	"gist/backend/internal/db"
 	"gist/backend/internal/hashutil"
 	"gist/backend/internal/model"
+	"gist/backend/internal/searchtext"
 	"gist/backend/pkg/snowflake"
 
 	_ "modernc.org/sqlite"
@@ -147,9 +148,9 @@ func SeedEntry(t *testing.T, db *sql.DB, entry model.Entry) int64 {
 
 	_, err := db.ExecContext(
 		context.Background(),
-		`INSERT INTO entries (id, feed_id, hash, title, url, content, readable_content, thumbnail_url, author, published_at, read, starred, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.ID, entry.FeedID, entry.Hash, ptrVal(entry.Title), ptrVal(entry.URL), ptrVal(entry.Content), ptrVal(entry.ReadableContent),
+		`INSERT INTO entries (id, feed_id, hash, title, url, content, search_text, readable_content, thumbnail_url, author, published_at, read, starred, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.ID, entry.FeedID, entry.Hash, ptrVal(entry.Title), ptrVal(entry.URL), ptrVal(entry.Content), searchtext.Build(entry.Title, entry.Content), ptrVal(entry.ReadableContent),
 		ptrVal(entry.ThumbnailURL), ptrVal(entry.Author), timeVal(entry.PublishedAt), boolToInt(entry.Read), boolToInt(entry.Starred), now, now,
 	)
 	if err != nil {

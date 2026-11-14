@@ -93,6 +93,26 @@ describe("router", () => {
       });
     });
 
+    it("should parse /search with keyword", () => {
+      const result = parseRoute("/search", "q=并发&type=notification");
+      expect(result).toEqual({
+        selection: { type: "search", query: "并发" },
+        entryId: null,
+        unreadOnly: false,
+        contentType: "notification",
+      });
+    });
+
+    it("should parse /search with entry id", () => {
+      const result = parseRoute("/search/123", "q=%E5%B9%B6%E5%8F%91");
+      expect(result).toEqual({
+        selection: { type: "search", query: "并发" },
+        entryId: "123",
+        unreadOnly: false,
+        contentType: "article",
+      });
+    });
+
     it("should parse unread query parameter", () => {
       const result = parseRoute("/all", "unread=true");
       expect(result.unreadOnly).toBe(true);
@@ -149,6 +169,18 @@ describe("router", () => {
 
     it("should build /starred with entry id", () => {
       expect(buildPath({ type: "starred" }, "333")).toBe("/starred/333");
+    });
+
+    it("should build /search with keyword", () => {
+      expect(
+        buildPath({ type: "search", query: "并发" }, null, false, "article"),
+      ).toBe("/search?q=%E5%B9%B6%E5%8F%91&type=article");
+    });
+
+    it("should build /search with entry id and keyword", () => {
+      expect(
+        buildPath({ type: "search", query: "并发" }, "123", false, "article"),
+      ).toBe("/search/123?q=%E5%B9%B6%E5%8F%91&type=article");
     });
 
     it("should add unread query parameter", () => {

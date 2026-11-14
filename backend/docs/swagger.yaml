@@ -1082,6 +1082,10 @@ paths:
         in: query
         name: starredOnly
         type: boolean
+      - description: Search keyword in title or content (max 100 characters)
+        in: query
+        name: q
+        type: string
       - description: Limit the number of entries (default 50)
         in: query
         name: limit

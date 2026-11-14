@@ -4,7 +4,9 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 
@@ -13,7 +15,10 @@ import (
 	"gist/backend/pkg/logger"
 )
 
-const maxEntryReadBatchIDs = 1000
+const (
+	maxEntryReadBatchIDs      = 1000
+	maxEntrySearchQueryLength = 100
+)
 
 type EntryHandler struct {
 	service            service.EntryService
@@ -129,6 +134,7 @@ func parseEntryIDList(rawIDs []string) ([]int64, string) {
 // @Param contentType query string false "Filter by content type (article, picture, notification)"
 // @Param unreadOnly query bool false "Only return unread entries"
 // @Param starredOnly query bool false "Only return starred entries"
+// @Param q query string false "Search keyword in title or content (max 100 characters)"
 // @Param limit query int false "Limit the number of entries (default 50)"
 // @Param offset query int false "Offset for pagination"
 // @Success 200 {object} entryListResponse
@@ -173,6 +179,13 @@ func (h *EntryHandler) List(c echo.Context) error {
 
 	if c.QueryParam("hasThumbnail") == "true" {
 		params.HasThumbnail = true
+	}
+
+	if raw := strings.TrimSpace(c.QueryParam("q")); raw != "" {
+		if utf8.RuneCountInString(raw) > maxEntrySearchQueryLength {
+			return c.JSON(http.StatusBadRequest, errorResponse{Error: "invalid q"})
+		}
+		params.Search = raw
 	}
 
 	if raw := c.QueryParam("limit"); raw != "" {

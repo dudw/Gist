@@ -108,4 +108,56 @@ describe("EntryListItem", () => {
 
     expect(screen.queryByText("Entry summary")).toBeNull();
   });
+
+  it("搜索时高亮标题中的命中词", () => {
+    const { container } = render(
+      <EntryListItem
+        entry={{ ...entry, title: "Rust 并发编程", content: "<p>正文内容</p>" }}
+        feed={feed}
+        isSelected={false}
+        onClick={vi.fn()}
+        searchQuery="并发"
+      />,
+    );
+
+    const marks = Array.from(container.querySelectorAll("mark"));
+    expect(marks.some((mark) => mark.textContent === "并发")).toBe(true);
+  });
+
+  it("搜索时展示正文命中片段并高亮", () => {
+    const { container } = render(
+      <EntryListItem
+        entry={{
+          ...entry,
+          title: "无关标题",
+          content: `<p>${"前置内容".repeat(20)}特殊关键词${"后续内容".repeat(20)}</p>`,
+        }}
+        feed={feed}
+        isSelected={false}
+        onClick={vi.fn()}
+        searchQuery="特殊关键词"
+      />,
+    );
+
+    const summary = container.querySelector(".line-clamp-2.pr-10");
+    expect(summary?.textContent).toContain("特殊关键词");
+    expect(summary?.textContent).toContain("…");
+
+    const marks = Array.from(container.querySelectorAll("mark"));
+    expect(marks.some((mark) => mark.textContent === "特殊关键词")).toBe(true);
+  });
+
+  it("搜索词未命中时不渲染高亮", () => {
+    const { container } = render(
+      <EntryListItem
+        entry={entry}
+        feed={feed}
+        isSelected={false}
+        onClick={vi.fn()}
+        searchQuery="不存在"
+      />,
+    );
+
+    expect(container.querySelectorAll("mark")).toHaveLength(0);
+  });
 });

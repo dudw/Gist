@@ -1,14 +1,18 @@
 package handler_test
 
 import (
-	"gist/backend/internal/handler"
+	"context"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"gist/backend/internal/handler"
 	"gist/backend/internal/model"
+	"gist/backend/internal/service"
 	"gist/backend/internal/service/mock"
 )
 
@@ -75,6 +79,51 @@ func TestEntryHandler_List_HasMore(t *testing.T) {
 	assertJSONResponse(t, rec, http.StatusOK, &resp)
 	require.Len(t, resp.Entries, 2, "should return only limit entries")
 	require.True(t, resp.HasMore, "should have more when returned entries > limit")
+}
+
+func TestEntryHandler_List_PassesTrimmedSearchQuery(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := mock.NewMockEntryService(ctrl)
+	h := handler.NewEntryHandlerHelper(mockService, nil)
+
+	params := url.Values{}
+	params.Set("q", "  并发  ")
+
+	e := newTestEcho()
+	req := newJSONRequest(http.MethodGet, "/entries?"+params.Encode(), nil)
+	c, rec := newTestContext(e, req)
+
+	mockService.EXPECT().
+		List(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, listParams service.EntryListParams) ([]model.Entry, error) {
+			require.Equal(t, "并发", listParams.Search)
+			return []model.Entry{}, nil
+		})
+
+	err := h.List(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestEntryHandler_List_RejectsTooLongSearchQuery(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := mock.NewMockEntryService(ctrl)
+	h := handler.NewEntryHandlerHelper(mockService, nil)
+
+	params := url.Values{}
+	params.Set("q", strings.Repeat("搜", 101))
+
+	e := newTestEcho()
+	req := newJSONRequest(http.MethodGet, "/entries?"+params.Encode(), nil)
+	c, rec := newTestContext(e, req)
+
+	err := h.List(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestEntryHandler_GetByID_Success(t *testing.T) {

@@ -472,6 +472,9 @@ export async function listEntries(
   if (params.hasThumbnail) {
     searchParams.set("hasThumbnail", "true");
   }
+  if (params.q) {
+    searchParams.set("q", params.q);
+  }
   if (params.limit !== undefined) {
     searchParams.set("limit", String(params.limit));
   }

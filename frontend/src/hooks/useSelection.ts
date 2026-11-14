@@ -7,10 +7,29 @@ export type SelectionType =
   | { type: "all" }
   | { type: "feed"; feedId: string }
   | { type: "folder"; folderId: string }
-  | { type: "starred" };
+  | { type: "starred" }
+  | { type: "search"; query: string };
 
 interface NavigateOptions {
   replace?: boolean;
+}
+
+const LAST_VIEW_STORAGE_KEY = "gist:last-view";
+
+function rememberLastView(path: string): void {
+  try {
+    sessionStorage.setItem(LAST_VIEW_STORAGE_KEY, path);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function getLastView(): string | null {
+  try {
+    return sessionStorage.getItem(LAST_VIEW_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 interface UseSelectionReturn {
@@ -19,6 +38,8 @@ interface UseSelectionReturn {
   selectFeed: (feedId: string, options?: NavigateOptions) => void;
   selectFolder: (folderId: string, options?: NavigateOptions) => void;
   selectStarred: (options?: NavigateOptions) => void;
+  selectSearch: (query: string, options?: NavigateOptions) => void;
+  exitSearch: (options?: NavigateOptions) => void;
   selectedEntryId: string | null;
   selectEntry: (entryId: string | null, options?: NavigateOptions) => void;
   unreadOnly: boolean;
@@ -96,6 +117,57 @@ export function useSelection(): UseSelectionReturn {
     [navigate, routeState.unreadOnly, routeState.contentType],
   );
 
+  const selectSearch = useCallback(
+    (query: string, options?: NavigateOptions) => {
+      const trimmed = query.trim();
+      if (!trimmed) return;
+
+      const isSearchView = routeState.selection.type === "search";
+
+      // 记录进入搜索前的视图，退出搜索时恢复
+      if (!isSearchView) {
+        rememberLastView(
+          buildPath(
+            routeState.selection,
+            null,
+            routeState.unreadOnly,
+            routeState.contentType,
+          ),
+        );
+      }
+
+      navigate(
+        buildPath(
+          { type: "search", query: trimmed },
+          null,
+          false,
+          routeState.contentType,
+        ),
+        // 搜索中输入变化时替换当前历史记录，避免返回键逐字回退
+        isSearchView ? { replace: true, ...options } : options,
+      );
+    },
+    [
+      navigate,
+      routeState.selection,
+      routeState.unreadOnly,
+      routeState.contentType,
+    ],
+  );
+
+  const exitSearch = useCallback(
+    (options?: NavigateOptions) => {
+      const fallback = buildPath(
+        { type: "all" },
+        null,
+        false,
+        routeState.contentType,
+      );
+      navigate(getLastView() ?? fallback, { replace: true, ...options });
+    },
+    [navigate, routeState.contentType],
+  );
+
   const selectEntry = useCallback(
     (entryId: string | null, options?: NavigateOptions) => {
       navigate(
@@ -154,6 +226,8 @@ export function useSelection(): UseSelectionReturn {
     selectFeed,
     selectFolder,
     selectStarred,
+    selectSearch,
+    exitSearch,
     selectedEntryId: routeState.entryId,
     selectEntry,
     unreadOnly: routeState.unreadOnly,
@@ -171,12 +245,14 @@ export function selectionToParams(
   folderId?: string;
   starredOnly?: boolean;
   contentType?: ContentType;
+  q?: string;
 } {
   const base: {
     feedId?: string;
     folderId?: string;
     starredOnly?: boolean;
     contentType?: ContentType;
+    q?: string;
   } = {};
 
   // Only include contentType for 'all' selection since feed/folder already filter by their own type
@@ -193,5 +269,7 @@ export function selectionToParams(
       return { ...base, folderId: selection.folderId };
     case "starred":
       return { ...base, starredOnly: true };
+    case "search":
+      return { ...base, contentType, q: selection.query };
   }
 }

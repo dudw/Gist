@@ -18,6 +18,7 @@ type EntryListParams struct {
 	UnreadOnly   bool
 	StarredOnly  bool
 	HasThumbnail bool
+	Search       string
 	Limit        int
 	Offset       int
 }
@@ -95,6 +96,7 @@ func (s *entryService) List(ctx context.Context, params EntryListParams) ([]mode
 		UnreadOnly:   params.UnreadOnly,
 		StarredOnly:  params.StarredOnly,
 		HasThumbnail: params.HasThumbnail,
+		Search:       params.Search,
 		Limit:        limit,
 		Offset:       params.Offset,
 	}

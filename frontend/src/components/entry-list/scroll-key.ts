@@ -14,6 +14,8 @@ export function selectionScrollKey(
       return `folder:${selection.folderId}:${contentType}`;
     case "starred":
       return `starred:${contentType}`;
+    case "search":
+      return `search:${contentType}:${selection.query}`;
   }
 }
 

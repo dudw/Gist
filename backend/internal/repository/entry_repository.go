@@ -6,11 +6,17 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gist/backend/internal/model"
+	"gist/backend/internal/searchtext"
 	"gist/backend/internal/urlutil"
 	"gist/backend/pkg/snowflake"
 )
+
+// entrySearchMinFTSTermRunes trigram 索引要求查询词至少包含 3 个字符，
+// 更短的查询词回退到 LIKE 子串匹配。
+const entrySearchMinFTSTermRunes = 3
 
 type EntryListFilter struct {
 	FeedID       *int64
@@ -19,6 +25,7 @@ type EntryListFilter struct {
 	UnreadOnly   bool
 	StarredOnly  bool
 	HasThumbnail bool
+	Search       string
 	Limit        int
 	Offset       int
 }
@@ -66,11 +73,23 @@ func (r *entryRepository) GetByID(ctx context.Context, id int64) (model.Entry, e
 
 func (r *entryRepository) List(ctx context.Context, filter EntryListFilter) ([]model.Entry, error) {
 	var args []interface{}
+	search := strings.TrimSpace(filter.Search)
+
+	useFTS := false
+	var ftsQuery string
+	if search != "" {
+		ftsQuery, useFTS = buildEntryFTSQuery(search)
+	}
+
 	query := `
 		SELECT e.id, e.feed_id, e.hash, e.title, e.url, e.content, e.readable_content, e.thumbnail_url, e.author,
 		       e.published_at, e.read, e.starred, e.created_at, e.updated_at
 		FROM entries e
 	`
+
+	if useFTS {
+		query += " INNER JOIN entries_fts ON entries_fts.rowid = e.id"
+	}
 
 	var conditions []string
 	needFeedsJoin := filter.FolderID != nil || filter.ContentType != nil
@@ -106,11 +125,33 @@ func (r *entryRepository) List(ctx context.Context, filter EntryListFilter) ([]m
 		conditions = append(conditions, "e.thumbnail_url IS NOT NULL AND e.thumbnail_url != ''")
 	}
 
+	if search != "" {
+		if useFTS {
+			conditions = append(conditions, "entries_fts MATCH ?")
+			args = append(args, ftsQuery)
+		} else {
+			// 短查询无法使用 trigram 索引，退化为子串匹配
+			for _, term := range strings.Fields(search) {
+				pattern := entrySearchLikePattern(term)
+				conditions = append(conditions, "(e.title LIKE ? ESCAPE '\\' OR e.search_text LIKE ? ESCAPE '\\')")
+				args = append(args, pattern, pattern)
+			}
+		}
+	}
+
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	query += " ORDER BY e.published_at DESC, e.id DESC"
+	switch {
+	case useFTS:
+		query += " ORDER BY bm25(entries_fts, 10.0, 1.0), e.published_at DESC, e.id DESC"
+	case search != "":
+		query += " ORDER BY CASE WHEN e.title LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, e.published_at DESC, e.id DESC"
+		args = append(args, entrySearchLikePattern(search))
+	default:
+		query += " ORDER BY e.published_at DESC, e.id DESC"
+	}
 
 	if filter.Limit > 0 {
 		query += " LIMIT ?"
@@ -148,6 +189,32 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+// buildEntryFTSQuery 将用户输入转换为 FTS5 查询表达式。
+// 每个空白分词都会加双引号按字面量匹配；任一分词少于 3 个字符时返回 false，
+// 由调用方回退到 LIKE 子串匹配（trigram 索引无法命中短查询）。
+func buildEntryFTSQuery(search string) (string, bool) {
+	terms := strings.Fields(search)
+	if len(terms) == 0 {
+		return "", false
+	}
+
+	quoted := make([]string, 0, len(terms))
+	for _, term := range terms {
+		if utf8.RuneCountInString(term) < entrySearchMinFTSTermRunes {
+			return "", false
+		}
+		quoted = append(quoted, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
+	}
+
+	return strings.Join(quoted, " AND "), true
+}
+
+// entrySearchLikePattern 将搜索词转义为安全的 LIKE 子串模式。
+func entrySearchLikePattern(term string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return "%" + replacer.Replace(term) + "%"
 }
 
 func (r *entryRepository) ListUnreadForRule(ctx context.Context, feedIDs []int64, afterID int64, limit int) ([]model.Entry, error) {
@@ -343,6 +410,7 @@ func parseTimePtr(s string) *time.Time {
 func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry) error {
 	id := snowflake.NextID()
 	now := formatTime(time.Now())
+	searchText := searchtext.Build(entry.Title, entry.Content)
 
 	var publishedAt interface{}
 	if entry.PublishedAt != nil {
@@ -362,6 +430,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 			   title = ?,
 			   url = ?,
 			   content = ?,
+			   search_text = ?,
 			   thumbnail_url = ?,
 			   author = ?,
 			   published_at = COALESCE(entries.published_at, ?),
@@ -389,6 +458,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 			entry.Title,
 			entry.URL,
 			entry.Content,
+			searchText,
 			entry.ThumbnailURL,
 			entry.Author,
 			publishedAt,
@@ -410,12 +480,13 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 
 	_, err := r.db.ExecContext(
 		ctx,
-		`INSERT INTO entries (id, feed_id, hash, title, url, content, thumbnail_url, author, published_at, read, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO entries (id, feed_id, hash, title, url, content, search_text, thumbnail_url, author, published_at, read, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(feed_id, hash) DO UPDATE SET
 		   title = excluded.title,
 		   url = excluded.url,
 		   content = excluded.content,
+		   search_text = excluded.search_text,
 		   thumbnail_url = excluded.thumbnail_url,
 		   author = excluded.author,
 		   published_at = COALESCE(entries.published_at, excluded.published_at),
@@ -426,6 +497,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 		entry.Title,
 		entry.URL,
 		entry.Content,
+		searchText,
 		entry.ThumbnailURL,
 		entry.Author,
 		publishedAt,

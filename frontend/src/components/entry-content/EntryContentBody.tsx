@@ -1,5 +1,5 @@
 import type { RefCallback } from "react";
-import { useRef } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useCodeHighlight } from "@/hooks/useCodeHighlight";
 import { useEntryMeta } from "@/hooks/useEntryMeta";
@@ -49,6 +49,52 @@ export function EntryContentBody({
   const contentRef = useRef<HTMLDivElement>(null);
   const articleWidth = useUISettingKey("articleWidth");
   const { setArticleWidth } = useUISettingActions();
+  const articleRef = useRef<HTMLElement>(null);
+  const widthProbeRef = useRef<HTMLSpanElement>(null);
+  // 内容区当前能容纳的最大字符宽度，保证放大到最后正好铺满内容区
+  const [maxArticleWidth, setMaxArticleWidth] = useState(ARTICLE_WIDTH_MAX);
+
+  useLayoutEffect(() => {
+    const container = articleRef.current?.parentElement;
+    const probe = widthProbeRef.current;
+    if (!container || !probe) return;
+
+    const updateMaxWidth = () => {
+      const charWidth = probe.offsetWidth / 100;
+      const containerWidth = container.clientWidth;
+      if (!charWidth || !containerWidth) return;
+
+      setMaxArticleWidth(
+        Math.max(ARTICLE_WIDTH_MIN, Math.floor(containerWidth / charWidth)),
+      );
+    };
+
+    updateMaxWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateMaxWidth);
+      return () => window.removeEventListener("resize", updateMaxWidth);
+    }
+
+    const observer = new ResizeObserver(updateMaxWidth);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  const effectiveArticleWidth = Math.min(articleWidth, maxArticleWidth);
+  const isFullWidth = articleWidth >= maxArticleWidth;
+
+  const handleDecreaseWidth = useCallback(() => {
+    setArticleWidth(
+      Math.max(effectiveArticleWidth - ARTICLE_WIDTH_STEP, ARTICLE_WIDTH_MIN),
+    );
+  }, [effectiveArticleWidth, setArticleWidth]);
+
+  const handleIncreaseWidth = useCallback(() => {
+    setArticleWidth(
+      Math.min(effectiveArticleWidth + ARTICLE_WIDTH_STEP, maxArticleWidth),
+    );
+  }, [effectiveArticleWidth, maxArticleWidth, setArticleWidth]);
 
   // Apply code highlighting after content renders
   useCodeHighlight(contentRef, highlightContent ?? displayContent ?? "");
@@ -63,9 +109,18 @@ export function EntryContentBody({
       className="entry-content-viewport flex-1 overflow-y-auto [overflow-anchor:none]"
     >
       <article
+        ref={articleRef}
         className="entry-content mx-auto w-full min-w-0 overflow-x-hidden px-4 sm:px-6 pb-20 pt-16"
-        style={{ maxWidth: `${articleWidth}ch` }}
+        style={{
+          maxWidth: isFullWidth ? "100%" : `${effectiveArticleWidth}ch`,
+        }}
       >
+        <span
+          ref={widthProbeRef}
+          aria-hidden="true"
+          className="pointer-events-none invisible absolute h-0"
+          style={{ width: "100ch" }}
+        />
         <header className="mb-4 space-y-5">
           <h1 className="text-3xl font-bold leading-tight tracking-tight text-foreground wrap-anywhere sm:text-4xl sm:leading-[1.15]">
             {entry.url && isSafeUrl(entry.url) ? (
@@ -107,10 +162,8 @@ export function EntryContentBody({
             <div className="ml-auto flex items-center gap-1">
               <button
                 type="button"
-                onClick={() =>
-                  setArticleWidth(articleWidth - ARTICLE_WIDTH_STEP)
-                }
-                disabled={articleWidth <= ARTICLE_WIDTH_MIN}
+                onClick={handleDecreaseWidth}
+                disabled={effectiveArticleWidth <= ARTICLE_WIDTH_MIN}
                 title={t("entry.decrease_width")}
                 aria-label={t("entry.decrease_width")}
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-item-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -128,10 +181,8 @@ export function EntryContentBody({
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  setArticleWidth(articleWidth + ARTICLE_WIDTH_STEP)
-                }
-                disabled={articleWidth >= ARTICLE_WIDTH_MAX}
+                onClick={handleIncreaseWidth}
+                disabled={effectiveArticleWidth >= maxArticleWidth}
                 title={t("entry.increase_width")}
                 aria-label={t("entry.increase_width")}
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-item-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
