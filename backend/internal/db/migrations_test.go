@@ -3,8 +3,11 @@ package db_test
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"gist/backend/internal/db"
+	"gist/backend/internal/hashutil"
+	"gist/backend/internal/urlutil"
 
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
@@ -36,67 +39,7 @@ func TestMigrate_EntryHashDeduplication_MergesHistoricalDuplicates(t *testing.T)
 	require.NoError(t, err)
 	defer database.Close()
 
-	_, err = database.Exec(`
-		CREATE TABLE feeds (
-			id INTEGER PRIMARY KEY,
-			folder_id INTEGER,
-			title TEXT NOT NULL,
-			url TEXT NOT NULL UNIQUE,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		);
-
-		CREATE TABLE entries (
-			id INTEGER PRIMARY KEY,
-			feed_id INTEGER NOT NULL,
-			title TEXT,
-			url TEXT,
-			content TEXT,
-			author TEXT,
-			published_at TEXT,
-			read INTEGER NOT NULL DEFAULT 0,
-			starred INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
-			FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE
-		);
-
-		CREATE UNIQUE INDEX idx_entries_feed_url ON entries(feed_id, url);
-
-		CREATE TABLE ai_summaries (
-			id INTEGER PRIMARY KEY,
-			entry_id INTEGER NOT NULL,
-			is_readability INTEGER NOT NULL DEFAULT 0,
-			language TEXT NOT NULL,
-			summary TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
-		);
-		CREATE UNIQUE INDEX idx_ai_summaries_entry_mode ON ai_summaries(entry_id, is_readability, language);
-
-		CREATE TABLE ai_translations (
-			id INTEGER PRIMARY KEY,
-			entry_id INTEGER NOT NULL,
-			is_readability INTEGER NOT NULL DEFAULT 0,
-			language TEXT NOT NULL,
-			content TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
-		);
-		CREATE UNIQUE INDEX idx_ai_translations_entry_mode ON ai_translations(entry_id, is_readability, language);
-
-		CREATE TABLE ai_list_translations (
-			id INTEGER PRIMARY KEY,
-			entry_id INTEGER NOT NULL,
-			language TEXT NOT NULL,
-			title TEXT NOT NULL,
-			summary TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
-		);
-		CREATE UNIQUE INDEX idx_ai_list_translations_entry_lang ON ai_list_translations(entry_id, language);
-	`)
-	require.NoError(t, err)
+	createLegacyEntryDedupSchema(t, database)
 
 	_, err = database.Exec(`INSERT INTO feeds (id, title, url, created_at, updated_at) VALUES (1, 'feed', 'https://example.com/rss', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')`)
 	require.NoError(t, err)
@@ -283,4 +226,125 @@ func TestMigrate_EntrySearchRebuildsLegacyFTS(t *testing.T) {
 		`SELECT COUNT(*) FROM entries_fts WHERE entries_fts MATCH '"trigger body"'`,
 	).Scan(&matchCount))
 	require.Equal(t, 1, matchCount)
+}
+
+// createLegacyEntryDedupSchema 构造 hash 迁移之前的旧库结构。
+func createLegacyEntryDedupSchema(t *testing.T, database *sql.DB) {
+	t.Helper()
+
+	_, err := database.Exec(`
+		CREATE TABLE feeds (
+			id INTEGER PRIMARY KEY,
+			folder_id INTEGER,
+			title TEXT NOT NULL,
+			url TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+
+		CREATE TABLE entries (
+			id INTEGER PRIMARY KEY,
+			feed_id INTEGER NOT NULL,
+			title TEXT,
+			url TEXT,
+			content TEXT,
+			author TEXT,
+			published_at TEXT,
+			read INTEGER NOT NULL DEFAULT 0,
+			starred INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE
+		);
+
+		CREATE UNIQUE INDEX idx_entries_feed_url ON entries(feed_id, url);
+
+		CREATE TABLE ai_summaries (
+			id INTEGER PRIMARY KEY,
+			entry_id INTEGER NOT NULL,
+			is_readability INTEGER NOT NULL DEFAULT 0,
+			language TEXT NOT NULL,
+			summary TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+		);
+		CREATE UNIQUE INDEX idx_ai_summaries_entry_mode ON ai_summaries(entry_id, is_readability, language);
+
+		CREATE TABLE ai_translations (
+			id INTEGER PRIMARY KEY,
+			entry_id INTEGER NOT NULL,
+			is_readability INTEGER NOT NULL DEFAULT 0,
+			language TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+		);
+		CREATE UNIQUE INDEX idx_ai_translations_entry_mode ON ai_translations(entry_id, is_readability, language);
+
+		CREATE TABLE ai_list_translations (
+			id INTEGER PRIMARY KEY,
+			entry_id INTEGER NOT NULL,
+			language TEXT NOT NULL,
+			title TEXT NOT NULL,
+			summary TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+		);
+		CREATE UNIQUE INDEX idx_ai_list_translations_entry_lang ON ai_list_translations(entry_id, language);
+	`)
+	require.NoError(t, err)
+}
+
+func TestMigrate_EntryCanonicalIdentity_MergesEquivalentLinks(t *testing.T) {
+	database, err := sql.Open("sqlite", "file::memory:?cache=shared&_pragma=foreign_keys(1)")
+	require.NoError(t, err)
+	defer database.Close()
+
+	createLegacyEntryDedupSchema(t, database)
+
+	_, err = database.Exec(`INSERT INTO feeds (id, title, url, created_at, updated_at) VALUES (1, 'feed', 'https://example.com/rss', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+
+	// 同一篇文章因为等价链接（多一个斜杠）被当成两条记录，这是迁移要修复的历史脏数据。
+	plainURL := "https://www.t66y.com/htm_data/2611/5/7511015.html"
+	doubleSlashURL := "https://www.t66y.com//htm_data/2611/5/7511015.html"
+	_, err = database.Exec(`
+		INSERT INTO entries (id, feed_id, title, url, content, author, published_at, read, starred, created_at, updated_at) VALUES
+		(1001, 1, 'same title', ?, 'same body', NULL, '2026-11-15T00:48:37Z', 1, 0, '2026-11-15T01:10:20Z', '2026-11-15T01:10:20Z'),
+		(1002, 1, 'same title', ?, 'same body', NULL, '2026-11-15T00:48:37Z', 0, 1, '2026-11-15T01:24:55Z', '2026-11-15T01:24:55Z')
+	`, plainURL, doubleSlashURL)
+	require.NoError(t, err)
+
+	require.NoError(t, db.Migrate(database))
+
+	var entryCount int
+	require.NoError(t, database.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&entryCount))
+	require.Equal(t, 1, entryCount)
+
+	var hash string
+	var read, starred int
+	require.NoError(t, database.QueryRow(
+		`SELECT hash, read, starred FROM entries WHERE id = 1002`,
+	).Scan(&hash, &read, &starred))
+	require.Equal(t, hashutil.SHA256Hex(urlutil.NormalizeForHash(plainURL)), hash)
+	require.Equal(t, 1, read)
+	require.Equal(t, 1, starred)
+
+	var contentHash string
+	require.NoError(t, database.QueryRow(
+		`SELECT content_hash FROM entries WHERE id = 1002`,
+	).Scan(&contentHash))
+	publishedAt := time.Date(2026, 11, 15, 0, 48, 37, 0, time.UTC)
+	require.Equal(t, hashutil.EntryContentHash("same title", &publishedAt, "same body"), contentHash)
+
+	var contentHashIndexCount int
+	require.NoError(t, database.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_entries_feed_content_hash'`,
+	).Scan(&contentHashIndexCount))
+	require.Equal(t, 1, contentHashIndexCount)
+
+	// 迁移必须幂等：重复执行不能再删数据。
+	require.NoError(t, db.Migrate(database))
+	require.NoError(t, database.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&entryCount))
+	require.Equal(t, 1, entryCount)
 }

@@ -21,6 +21,7 @@ import (
 	"gist/backend/internal/hashutil"
 	"gist/backend/internal/model"
 	"gist/backend/internal/repository"
+	"gist/backend/internal/urlutil"
 	"gist/backend/pkg/logger"
 	"gist/backend/pkg/network"
 	"gist/backend/pkg/sanitizer"
@@ -647,22 +648,59 @@ func itemToEntry(feedID int64, item *gofeed.Item, ignoreDynamicTime bool) model.
 
 	entry.PublishedAt = extractPublishedAt(item, ignoreDynamicTime)
 	entry.Hash = computeEntryHash(item, title, content)
+	entry.ContentHash = hashutil.EntryContentHash(title, stablePublishedAt(item), content)
 
 	return entry
 }
 
+// stablePublishedAt 返回订阅源真正提供的发布时间，不含「当前时间」兜底，
+// 保证内容指纹不随刷新时刻漂移。没有稳定发布时间时返回 nil。
+func stablePublishedAt(item *gofeed.Item) *time.Time {
+	if t := extractDateFromSummary(item.Description); t != nil {
+		return t
+	}
+	if item.PublishedParsed != nil {
+		t := item.PublishedParsed.UTC()
+		return &t
+	}
+	return nil
+}
+
+// computeEntryHash 计算文章身份哈希：GUID 优先，其次归一化链接，最后标题+正文。
+// 链接必须先归一化，否则同一篇文章的等价链接（重复斜杠、追踪参数、discuz 多种路由）
+// 会得到不同哈希，从而绕过 (feed_id, hash) 唯一约束。
 func computeEntryHash(item *gofeed.Item, title string, content string) string {
 	if guid := strings.TrimSpace(item.GUID); guid != "" {
-		return hashToHex(guid)
+		return hashToHex(normalizeGUID(guid))
 	}
 	if link := strings.TrimSpace(item.Link); link != "" {
-		return hashToHex(link)
+		if normalized := urlutil.NormalizeForHash(link); normalized != "" {
+			return hashToHex(normalized)
+		}
 	}
 	return hashToHex(strings.TrimSpace(title) + strings.TrimSpace(content))
 }
 
 func hashToHex(input string) string {
 	return hashutil.SHA256Hex(input)
+}
+
+// normalizeGUID 归一化「直接把链接写进 GUID」的订阅源输出。
+// RSSHub 等生成器常把文章链接当作 GUID，如果只归一化 link，
+// 同一篇文章的等价链接（重复斜杠、追踪参数）仍会算出不同哈希。
+// 仅当归一化对象确实是 http(s) 绝对地址时才处理，其它 GUID 视为不透明标识原样保留。
+func normalizeGUID(guid string) string {
+	parsed, err := url.Parse(guid)
+	if err != nil || parsed.Host == "" {
+		return guid
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return guid
+	}
+	if normalized := urlutil.NormalizeForHash(guid); normalized != "" {
+		return normalized
+	}
+	return guid
 }
 
 func extractPublishedAt(item *gofeed.Item, ignoreDynamicTime bool) *time.Time {

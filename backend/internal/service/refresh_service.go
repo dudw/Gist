@@ -127,9 +127,9 @@ func (s *refreshService) processParsedFeed(ctx context.Context, feed model.Feed,
 	}
 
 	// Save entries
-	newCount, updatedCount := s.saveEntries(ctx, feed.ID, parsed.Items)
-	if newCount > 0 || updatedCount > 0 {
-		logger.Info("feed refreshed", "module", "service", "action", "refresh", "resource", "feed", "result", "ok", "feed_id", feed.ID, "feed_title", feed.Title, "new", newCount, "updated", updatedCount)
+	newCount, updatedCount, duplicateCount := s.saveEntries(ctx, feed.ID, parsed.Items)
+	if newCount > 0 || updatedCount > 0 || duplicateCount > 0 {
+		logger.Info("feed refreshed", "module", "service", "action", "refresh", "resource", "feed", "result", "ok", "feed_id", feed.ID, "feed_title", feed.Title, "new", newCount, "updated", updatedCount, "duplicate", duplicateCount)
 	}
 
 	// Backfill siteURL if empty (for feeds added before siteURL was implemented)
@@ -160,8 +160,8 @@ func (s *refreshService) processParsedFeed(ctx context.Context, feed model.Feed,
 }
 
 // saveEntries saves parsed feed items to the database.
-// Returns the count of new and updated entries.
-func (s *refreshService) saveEntries(ctx context.Context, feedID int64, items []*gofeed.Item) (newCount, updatedCount int) {
+// Returns the count of new, updated and skipped-duplicate entries.
+func (s *refreshService) saveEntries(ctx context.Context, feedID int64, items []*gofeed.Item) (newCount, updatedCount, duplicateCount int) {
 	dynamicTime := hasDynamicTime(items)
 	compiledRules := s.enabledRulesForFeed(ctx, feedID)
 	for _, item := range items {
@@ -182,6 +182,19 @@ func (s *refreshService) saveEntries(ctx context.Context, feedID int64, items []
 				continue
 			}
 			exists = legacyExists
+		}
+		if !exists && entry.ContentHash != "" {
+			// 链接不稳定时（同一篇文章每次刷新给出不同链接）用内容指纹兜底判重。
+			// 命中后直接跳过写入，否则会插入一条内容完全相同的第二行。
+			duplicate, err := s.entries.ExistsByContentHash(ctx, feedID, entry.ContentHash)
+			if err != nil {
+				logger.Warn("check duplicated content failed", "module", "service", "action", "list", "resource", "entry", "result", "failed", "error", err)
+				continue
+			}
+			if duplicate {
+				duplicateCount++
+				continue
+			}
 		}
 
 		if !exists && matchesAnyRule(compiledRules, entry) {

@@ -412,6 +412,11 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("migrate entry search: %w", err)
 	}
 
+	// Migration 23: Canonical link hash + content fingerprint for entry deduplication.
+	if err := migrateEntryCanonicalIdentity(db); err != nil {
+		return fmt.Errorf("migrate entry canonical identity: %w", err)
+	}
+
 	return nil
 }
 
@@ -923,4 +928,302 @@ func chooseAsKeep(candidate dedupeEntry, current dedupeEntry) bool {
 
 func hashHex(input string) string {
 	return hashutil.SHA256Hex(input)
+}
+
+// entryContentHashIndex 同时是迁移 23 的幂等标记：索引存在说明迁移已完成。
+const entryContentHashIndex = "idx_entries_feed_content_hash"
+
+// migrateEntryCanonicalIdentity 归一化链接哈希并补充内容指纹。
+// 历史数据里同一篇文章可能因为等价链接（重复斜杠、追踪参数、discuz 多种帖子路由）
+// 算出不同哈希而重复入库，这里重算哈希并就地合并重复行。
+func migrateEntryCanonicalIdentity(db *sql.DB) error {
+	var indexCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`,
+		entryContentHashIndex,
+	).Scan(&indexCount); err != nil {
+		return fmt.Errorf("check %s: %w", entryContentHashIndex, err)
+	}
+	if indexCount > 0 {
+		return nil
+	}
+
+	hasContentHash, err := hasColumn(db, "entries", "content_hash")
+	if err != nil {
+		return fmt.Errorf("check content_hash column: %w", err)
+	}
+	if !hasContentHash {
+		if _, err := db.Exec(`ALTER TABLE entries ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add content_hash column: %w", err)
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 唯一索引会阻止哈希重算后的就地合并，先删除并在合并完成后重建。
+	if _, err := tx.Exec(`DROP INDEX IF EXISTS idx_entries_feed_hash`); err != nil {
+		return fmt.Errorf("drop idx_entries_feed_hash: %w", err)
+	}
+	if err := rewriteEntryHashes(tx); err != nil {
+		return err
+	}
+	if err := mergeEntryGroups(tx, "hash"); err != nil {
+		return fmt.Errorf("merge duplicate hash: %w", err)
+	}
+	if err := backfillEntryContentHash(tx); err != nil {
+		return err
+	}
+	if err := mergeEntryGroups(tx, "content_hash"); err != nil {
+		return fmt.Errorf("merge duplicate content: %w", err)
+	}
+	if err := ensureHashUniqueness(tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_feed_hash ON entries(feed_id, hash)`); err != nil {
+		return fmt.Errorf("create idx_entries_feed_hash: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS ` + entryContentHashIndex + ` ON entries(feed_id, content_hash)`); err != nil {
+		return fmt.Errorf("create %s: %w", entryContentHashIndex, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
+}
+
+// rewriteEntryHashes 只重算可证明由原始链接派生的哈希（hash == SHA256(url)），
+// GUID 派生等其它来源的哈希保持不动，避免下次刷新因身份键变化而重复插入。
+func rewriteEntryHashes(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT id, url, hash FROM entries WHERE url IS NOT NULL AND url <> ''`)
+	if err != nil {
+		return fmt.Errorf("query entries for hash rewrite: %w", err)
+	}
+
+	type hashUpdate struct {
+		id   int64
+		hash string
+	}
+	updates := make([]hashUpdate, 0)
+
+	for rows.Next() {
+		var (
+			id      int64
+			rawURL  string
+			oldHash string
+		)
+		if err := rows.Scan(&id, &rawURL, &oldHash); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan entry for hash rewrite: %w", err)
+		}
+		if oldHash != hashHex(rawURL) {
+			continue
+		}
+		normalizedURL := urlutil.NormalizeForHash(rawURL)
+		if normalizedURL == "" {
+			continue
+		}
+		newHash := hashHex(normalizedURL)
+		if newHash == oldHash {
+			continue
+		}
+		updates = append(updates, hashUpdate{id: id, hash: newHash})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate entries for hash rewrite: %w", err)
+	}
+	_ = rows.Close()
+
+	for _, update := range updates {
+		if _, err := tx.Exec(`UPDATE entries SET hash = ? WHERE id = ?`, update.hash, update.id); err != nil {
+			return fmt.Errorf("rewrite entry hash: %w", err)
+		}
+	}
+	return nil
+}
+
+// mergeEntryGroups 合并同一订阅源内判重键相同的重复文章，
+// 保留最新一条，并把已读/加星状态与 AI 缓存迁移到保留行。
+// keyColumn 只允许本文件内的常量列名（hash / content_hash），不接受外部输入。
+func mergeEntryGroups(tx *sql.Tx, keyColumn string) error {
+	rows, err := tx.Query(fmt.Sprintf(`
+		SELECT feed_id, %s
+		FROM entries
+		WHERE %s <> ''
+		GROUP BY feed_id, %s
+		HAVING COUNT(*) > 1
+	`, keyColumn, keyColumn, keyColumn))
+	if err != nil {
+		return fmt.Errorf("query duplicate %s groups: %w", keyColumn, err)
+	}
+
+	type duplicateKey struct {
+		feedID int64
+		hash   string
+	}
+	keys := make([]duplicateKey, 0)
+
+	for rows.Next() {
+		var key duplicateKey
+		if err := rows.Scan(&key.feedID, &key.hash); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan duplicate %s group: %w", keyColumn, err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate duplicate %s groups: %w", keyColumn, err)
+	}
+	_ = rows.Close()
+
+	for _, key := range keys {
+		if err := mergeEntryGroup(tx, key.feedID, keyColumn, key.hash); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func mergeEntryGroup(tx *sql.Tx, feedID int64, keyColumn string, keyValue string) error {
+	rows, err := tx.Query(
+		fmt.Sprintf(`SELECT id, read, starred, updated_at FROM entries WHERE feed_id = ? AND %s = ?`, keyColumn),
+		feedID,
+		keyValue,
+	)
+	if err != nil {
+		return fmt.Errorf("query duplicate %s group entries: %w", keyColumn, err)
+	}
+
+	var (
+		keeper       dedupeEntry
+		hasKeeper    bool
+		readMax      int
+		starredMax   int
+		duplicateIDs []int64
+	)
+
+	for rows.Next() {
+		var (
+			entry        dedupeEntry
+			updatedAtStr string
+		)
+		if err := rows.Scan(&entry.id, &entry.read, &entry.starred, &updatedAtStr); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan duplicate %s group entry: %w", keyColumn, err)
+		}
+		entry.updatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtStr)
+
+		if !hasKeeper {
+			keeper = entry
+			hasKeeper = true
+			readMax = entry.read
+			starredMax = entry.starred
+			continue
+		}
+
+		if entry.read > readMax {
+			readMax = entry.read
+		}
+		if entry.starred > starredMax {
+			starredMax = entry.starred
+		}
+		if chooseAsKeep(entry, keeper) {
+			duplicateIDs = append(duplicateIDs, keeper.id)
+			keeper = entry
+			continue
+		}
+		duplicateIDs = append(duplicateIDs, entry.id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate duplicate %s group entries: %w", keyColumn, err)
+	}
+	_ = rows.Close()
+
+	if len(duplicateIDs) == 0 {
+		return nil
+	}
+
+	if keeper.read != readMax || keeper.starred != starredMax {
+		if _, err := tx.Exec(
+			`UPDATE entries SET read = ?, starred = ? WHERE id = ?`,
+			readMax,
+			starredMax,
+			keeper.id,
+		); err != nil {
+			return fmt.Errorf("update merged entry state: %w", err)
+		}
+	}
+
+	for _, duplicateID := range duplicateIDs {
+		if err := moveEntryCaches(tx, duplicateID, keeper.id); err != nil {
+			return err
+		}
+	}
+
+	return deleteEntriesByID(tx, duplicateIDs)
+}
+
+// backfillEntryContentHash 为历史文章补齐内容指纹，空正文保持为空串。
+func backfillEntryContentHash(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT id, title, content, published_at FROM entries WHERE content_hash = ''`)
+	if err != nil {
+		return fmt.Errorf("query entries for content hash backfill: %w", err)
+	}
+
+	type contentHashUpdate struct {
+		id   int64
+		hash string
+	}
+	updates := make([]contentHashUpdate, 0)
+
+	for rows.Next() {
+		var (
+			id          int64
+			title       sql.NullString
+			content     sql.NullString
+			publishedAt sql.NullString
+		)
+		if err := rows.Scan(&id, &title, &content, &publishedAt); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan entry for content hash backfill: %w", err)
+		}
+		contentHash := hashutil.EntryContentHash(title.String, parsePublishedAt(publishedAt), content.String)
+		if contentHash == "" {
+			continue
+		}
+		updates = append(updates, contentHashUpdate{id: id, hash: contentHash})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate entries for content hash backfill: %w", err)
+	}
+	_ = rows.Close()
+
+	for _, update := range updates {
+		if _, err := tx.Exec(`UPDATE entries SET content_hash = ? WHERE id = ?`, update.hash, update.id); err != nil {
+			return fmt.Errorf("update entry content hash: %w", err)
+		}
+	}
+	return nil
+}
+
+// parsePublishedAt 解析历史文章的发布时间，用于计算内容指纹。
+// 解析失败按「没有发布时间」处理，与运行期缺失发布时间的语义一致。
+func parsePublishedAt(value sql.NullString) *time.Time {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value.String)
+	if err != nil {
+		return nil
+	}
+	utc := parsed.UTC()
+	return &utc
 }

@@ -33,7 +33,7 @@ Gist/
 | `internal/model` | 领域模型（Folder/Feed/Entry/Settings/AI 缓存/域名限流） |
 | `internal/db` | 连接与 DSN pragma（WAL、外键、busy_timeout）、内嵌式增量迁移 |
 | `internal/scheduler` | 15 分钟定时刷新，启动即执行一次，支持取消与优雅停止 |
-| `internal/hashutil` / `urlutil` | 文章去重哈希、URL 规范化/主机提取 |
+| `internal/hashutil` / `urlutil` | 文章去重哈希与内容指纹、URL 规范化/主机提取 |
 | `pkg/logger` | 基于 slog 的全局日志封装 |
 | `pkg/network` | `ClientFactory`：标准 HTTP 与 azuretls 客户端，统一代理/IP 栈 |
 | `pkg/opml` | OPML XML 解析/编码 |

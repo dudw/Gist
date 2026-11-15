@@ -37,6 +37,9 @@
 - `modernc.org/sqlite` 不支持 FTS5 特殊删除语法 `INSERT INTO fts(fts, ...) VALUES('delete', ...)`
 - 必须使用 `DELETE FROM fts WHERE rowid = ?`
 - 文章搜索：`entries.search_text` 保存「标题 + 去 HTML 正文」的纯文本，`entries_fts` 是基于它的 trigram FTS5 索引，由 INSERT/UPDATE/DELETE 触发器同步；新增文章写入路径时必须同时维护 `search_text`
+- 文章判重身份（三级）：`guid` → `urlutil.NormalizeForHash(链接)` → 标题+正文；GUID 本身是 http(s) 链接时同样先归一化（RSSHub 等生成器直接把链接当 GUID）；归一化只做不影响内容指向的变换（小写 scheme/host、剔除默认端口与追踪参数、折叠重复斜杠、去 fragment、查询参数排序，保留 `%2F` 等转义），discuz 站点的 `read.php?tid=N`、`htm_data/*/N.html`、`thread-N-*-*.html` 归并为同一帖子键
+- 内容指纹：`entries.content_hash` = `hashutil.EntryContentHash(title, publishedAt, content)`（正文空白折叠后为空则留空，避免仅凭标题误判；发布时间取订阅源真实时间，不含「当前时间」兜底），配 `idx_entries_feed_content_hash` 普通索引；只在链接身份不一致时兜底判重，命中则跳过写入，不加唯一索引以免正文更新冲突
+- `idx_entries_feed_hash` 仍为 `(feed_id, hash)` 唯一索引；新增/修改判重逻辑时必须同步维护迁移（历史重复行合并 + 哈希重算），并保持幂等
 
 **安全防御**：
 - Handler 层必须校验所有 Query/Body/Path 参数

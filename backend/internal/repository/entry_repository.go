@@ -49,6 +49,7 @@ type EntryRepository interface {
 	CreateOrUpdate(ctx context.Context, entry model.Entry) error
 	ExistsByHash(ctx context.Context, feedID int64, hash string) (bool, error)
 	ExistsByLegacyURL(ctx context.Context, feedID int64, rawURL string, hash string) (bool, error)
+	ExistsByContentHash(ctx context.Context, feedID int64, contentHash string) (bool, error)
 	ClearAllReadableContent(ctx context.Context) (int64, error)
 	DeleteUnstarred(ctx context.Context) (int64, error)
 }
@@ -64,7 +65,7 @@ func NewEntryRepository(db dbtx) EntryRepository {
 func (r *entryRepository) GetByID(ctx context.Context, id int64) (model.Entry, error) {
 	row := r.db.QueryRowContext(
 		ctx,
-		`SELECT id, feed_id, hash, title, url, content, readable_content, thumbnail_url, author, published_at, read, starred, created_at, updated_at
+		`SELECT id, feed_id, hash, content_hash, title, url, content, readable_content, thumbnail_url, author, published_at, read, starred, created_at, updated_at
 		 FROM entries WHERE id = ?`,
 		id,
 	)
@@ -82,7 +83,7 @@ func (r *entryRepository) List(ctx context.Context, filter EntryListFilter) ([]m
 	}
 
 	query := `
-		SELECT e.id, e.feed_id, e.hash, e.title, e.url, e.content, e.readable_content, e.thumbnail_url, e.author,
+		SELECT e.id, e.feed_id, e.hash, e.content_hash, e.title, e.url, e.content, e.readable_content, e.thumbnail_url, e.author,
 		       e.published_at, e.read, e.starred, e.created_at, e.updated_at
 		FROM entries e
 	`
@@ -234,7 +235,7 @@ func (r *entryRepository) ListUnreadForRule(ctx context.Context, feedIDs []int64
 	args = append(args, afterID, limit)
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, feed_id, hash, title, url, content, readable_content, thumbnail_url, author,
+		SELECT id, feed_id, hash, content_hash, title, url, content, readable_content, thumbnail_url, author,
 		       published_at, read, starred, created_at, updated_at
 		FROM entries
 		WHERE feed_id IN (`+strings.Join(placeholders, ",")+`)
@@ -381,7 +382,7 @@ func scanEntry(s entryScanner) (model.Entry, error) {
 	var readInt, starredInt int
 
 	err := s.Scan(
-		&e.ID, &e.FeedID, &e.Hash, &e.Title, &e.URL, &e.Content, &e.ReadableContent, &e.ThumbnailURL, &e.Author,
+		&e.ID, &e.FeedID, &e.Hash, &e.ContentHash, &e.Title, &e.URL, &e.Content, &e.ReadableContent, &e.ThumbnailURL, &e.Author,
 		&publishedAt, &readInt, &starredInt, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -427,6 +428,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 			ctx,
 			`UPDATE entries SET
 			   hash = ?,
+			   content_hash = COALESCE(NULLIF(?, ''), content_hash),
 			   title = ?,
 			   url = ?,
 			   content = ?,
@@ -455,6 +457,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 			       AND e2.id <> entries.id
 			   )`,
 			entry.Hash,
+			entry.ContentHash,
 			entry.Title,
 			entry.URL,
 			entry.Content,
@@ -480,9 +483,10 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 
 	_, err := r.db.ExecContext(
 		ctx,
-		`INSERT INTO entries (id, feed_id, hash, title, url, content, search_text, thumbnail_url, author, published_at, read, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO entries (id, feed_id, hash, content_hash, title, url, content, search_text, thumbnail_url, author, published_at, read, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(feed_id, hash) DO UPDATE SET
+		   content_hash = COALESCE(NULLIF(excluded.content_hash, ''), entries.content_hash),
 		   title = excluded.title,
 		   url = excluded.url,
 		   content = excluded.content,
@@ -494,6 +498,7 @@ func (r *entryRepository) CreateOrUpdate(ctx context.Context, entry model.Entry)
 		id,
 		entry.FeedID,
 		entry.Hash,
+		entry.ContentHash,
 		entry.Title,
 		entry.URL,
 		entry.Content,
@@ -639,6 +644,26 @@ func (r *entryRepository) ExistsByLegacyURL(ctx context.Context, feedID int64, r
 		hash,
 		trimmedURL,
 		normalizedURL,
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// ExistsByContentHash 判断同一订阅源内是否已存在内容完全一致的文章。
+// 用于链接不稳定（同一篇文章每次刷新链接不同）时兜底判重。
+func (r *entryRepository) ExistsByContentHash(ctx context.Context, feedID int64, contentHash string) (bool, error) {
+	if contentHash == "" {
+		return false, nil
+	}
+
+	var count int
+	err := r.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM entries WHERE feed_id = ? AND content_hash = ?`,
+		feedID,
+		contentHash,
 	).Scan(&count)
 	if err != nil {
 		return false, err

@@ -86,6 +86,21 @@ func (mr *MockEntryRepositoryMockRecorder) DeleteUnstarred(ctx any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUnstarred", reflect.TypeOf((*MockEntryRepository)(nil).DeleteUnstarred), ctx)
 }
 
+// ExistsByContentHash mocks base method.
+func (m *MockEntryRepository) ExistsByContentHash(ctx context.Context, feedID int64, contentHash string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExistsByContentHash", ctx, feedID, contentHash)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ExistsByContentHash indicates an expected call of ExistsByContentHash.
+func (mr *MockEntryRepositoryMockRecorder) ExistsByContentHash(ctx, feedID, contentHash any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExistsByContentHash", reflect.TypeOf((*MockEntryRepository)(nil).ExistsByContentHash), ctx, feedID, contentHash)
+}
+
 // ExistsByHash mocks base method.
 func (m *MockEntryRepository) ExistsByHash(ctx context.Context, feedID int64, hash string) (bool, error) {
 	m.ctrl.T.Helper()

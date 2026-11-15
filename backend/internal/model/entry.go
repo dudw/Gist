@@ -6,6 +6,7 @@ type Entry struct {
 	ID              int64
 	FeedID          int64
 	Hash            string
+	ContentHash     string
 	Title           *string
 	URL             *string
 	Content         *string

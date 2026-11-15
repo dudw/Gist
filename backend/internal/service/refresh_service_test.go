@@ -127,6 +127,7 @@ func TestRefreshService_RefreshFeed_Success(t *testing.T) {
 
 	mockEntries.EXPECT().ExistsByHash(gomock.Any(), int64(10), hashString("https://example.com/1")).Return(false, nil)
 	mockEntries.EXPECT().ExistsByLegacyURL(gomock.Any(), int64(10), "https://example.com/1", hashString("https://example.com/1")).Return(false, nil)
+	mockEntries.EXPECT().ExistsByContentHash(gomock.Any(), int64(10), gomock.Any()).Return(false, nil)
 	mockEntries.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any()).Return(nil)
 
 	client := &http.Client{
@@ -158,6 +159,78 @@ func TestRefreshService_RefreshFeed_Success(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// 链接不稳定（同一篇文章每次刷新链接不同）时，内容指纹必须兜底拦下重复写入。
+func TestRefreshService_RefreshFeed_SkipsEntryWithSameContentWhenLinkChanges(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockFeeds := mock.NewMockFeedRepository(ctrl)
+	mockEntries := mock.NewMockEntryRepository(ctrl)
+
+	feed := model.Feed{ID: 12, URL: "https://example.com/rss", Title: "Feed"}
+	mockFeeds.EXPECT().GetByID(gomock.Any(), int64(12)).Return(feed, nil).Times(2)
+	mockFeeds.EXPECT().UpdateErrorMessage(gomock.Any(), int64(12), nil).Return(nil)
+
+	originalLink := "https://example.com/post/7511015.html"
+	mirrorLink := "https://mirror.example.com/post/7511015.html"
+	originalHash := hashString(originalLink)
+	mirrorHash := hashString(mirrorLink)
+	require.NotEqual(t, originalHash, mirrorHash)
+
+	mockEntries.EXPECT().ExistsByHash(gomock.Any(), int64(12), originalHash).Return(false, nil)
+	mockEntries.EXPECT().ExistsByLegacyURL(gomock.Any(), int64(12), originalLink, originalHash).Return(false, nil)
+	mockEntries.EXPECT().ExistsByContentHash(gomock.Any(), int64(12), gomock.Any()).Return(false, nil)
+	mockEntries.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
+	mockEntries.EXPECT().ExistsByHash(gomock.Any(), int64(12), mirrorHash).Return(false, nil)
+	mockEntries.EXPECT().ExistsByLegacyURL(gomock.Any(), int64(12), mirrorLink, mirrorHash).Return(false, nil)
+	mockEntries.EXPECT().ExistsByContentHash(gomock.Any(), int64(12), gomock.Any()).Return(true, nil)
+
+	const duplicateContentRSS = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+  <title>Feed</title>
+  <item>
+    <title>同一篇文章</title>
+    <link>https://example.com/post/7511015.html</link>
+    <description>同样的正文</description>
+    <pubDate>Sun, 15 Nov 2026 00:48:37 GMT</pubDate>
+  </item>
+  <item>
+    <title>同一篇文章</title>
+    <link>https://mirror.example.com/post/7511015.html</link>
+    <description>同样的正文</description>
+    <pubDate>Sun, 15 Nov 2026 00:48:37 GMT</pubDate>
+  </item>
+</channel>
+</rss>`
+
+	client := &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(duplicateContentRSS)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	svc := service.NewRefreshService(
+		mockFeeds,
+		mockEntries,
+		nil,
+		nil,
+		network.NewClientFactoryForTest(client),
+		nil,
+		nil,
+		nil,
+	)
+
+	err := svc.RefreshFeed(context.Background(), 12)
+	require.NoError(t, err)
+}
+
 type ruleProviderStub struct {
 	rules []model.ArticleRule
 }
@@ -184,6 +257,7 @@ func TestRefreshService_RefreshFeed_AppliesArticleRuleToNewEntry(t *testing.T) {
 
 	mockEntries.EXPECT().ExistsByHash(gomock.Any(), int64(11), hashString("https://example.com/1")).Return(false, nil)
 	mockEntries.EXPECT().ExistsByLegacyURL(gomock.Any(), int64(11), "https://example.com/1", hashString("https://example.com/1")).Return(false, nil)
+	mockEntries.EXPECT().ExistsByContentHash(gomock.Any(), int64(11), gomock.Any()).Return(false, nil)
 	mockEntries.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, entry model.Entry) error {
 			require.True(t, entry.Read, "matching new entries should be inserted as read")
@@ -316,6 +390,7 @@ func TestRefreshService_RefreshFeed_FallbackUserAgent(t *testing.T) {
 
 	mockEntries.EXPECT().ExistsByHash(gomock.Any(), int64(2), hashString("https://example.com/1")).Return(false, nil)
 	mockEntries.EXPECT().ExistsByLegacyURL(gomock.Any(), int64(2), "https://example.com/1", hashString("https://example.com/1")).Return(false, nil)
+	mockEntries.EXPECT().ExistsByContentHash(gomock.Any(), int64(2), gomock.Any()).Return(false, nil)
 	mockEntries.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any()).Return(nil)
 
 	svc := service.NewRefreshService(
@@ -428,6 +503,7 @@ func TestRefreshService_RefreshFeed_SameGUIDDifferentURL_SecondRefreshCountsAsUp
 		},
 	).Times(2)
 	mockEntries.EXPECT().ExistsByLegacyURL(gomock.Any(), int64(20), "https://www.v2ex.com/t/1193191#reply10", hashString("v2ex-guid-1")).Return(false, nil).Times(1)
+	mockEntries.EXPECT().ExistsByContentHash(gomock.Any(), int64(20), gomock.Any()).Return(false, nil).Times(1)
 	mockEntries.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, entry model.Entry) error {
 			seen[entry.Hash] = true

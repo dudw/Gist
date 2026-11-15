@@ -559,8 +559,36 @@ func TestComputeEntryHash_FallbackToLink(t *testing.T) {
 		Link: " https://example.com/post?a=1#reply10 ",
 	}
 	hash := service.ComputeEntryHash(item, "title", "content")
-	require.Equal(t, hashString("https://example.com/post?a=1#reply10"), hash)
+	require.Equal(t, hashString("https://example.com/post?a=1"), hash)
 	require.Len(t, hash, 64)
+}
+
+// RSSHub 等生成器会把文章链接直接写进 GUID，此时 GUID 也必须归一化，
+// 否则等价链接（重复斜杠、追踪参数）会算出不同哈希而无法判重。
+func TestComputeEntryHash_NormalizesLinkLikeGUID(t *testing.T) {
+	item := &gofeed.Item{
+		GUID: " https://example.com//post//1?utm_source=rss#comments ",
+		Link: "https://example.com/post/1",
+	}
+	require.Equal(t, hashString("https://example.com/post/1"), service.ComputeEntryHash(item, "title", "content"))
+}
+
+func TestComputeEntryHash_UnifiesDiscuzGUIDRoutes(t *testing.T) {
+	plain := service.ComputeEntryHash(
+		&gofeed.Item{GUID: "https://www.t66y.com/htm_data/2611/5/7511015.html"},
+		"title", "content",
+	)
+	doubled := service.ComputeEntryHash(
+		&gofeed.Item{GUID: "https://www.t66y.com//htm_data/2611/5/7511015.html"},
+		"title", "content",
+	)
+	require.Equal(t, plain, doubled)
+}
+
+// 非链接形态的 GUID 是不透明标识，不能被归一化改写。
+func TestComputeEntryHash_KeepsOpaqueGUID(t *testing.T) {
+	item := &gofeed.Item{GUID: "tag:example.com,2026:post//1"}
+	require.Equal(t, hashString("tag:example.com,2026:post//1"), service.ComputeEntryHash(item, "title", "content"))
 }
 
 func TestComputeEntryHash_FallbackToTitleAndContent(t *testing.T) {
