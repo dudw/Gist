@@ -34,6 +34,19 @@ describe("extract-images", () => {
       expect(result[0]).toBe("https://example.com/real.jpg");
     });
 
+    it("should fall back to data-src when src is a data URI placeholder", () => {
+      const html =
+        '<img src="data:image/gif;base64,R0lGOD" data-src="https://example.com/lazy.jpg">';
+      const result = extractImagesFromHtml(html);
+      expect(result).toEqual(["https://example.com/lazy.jpg"]);
+    });
+
+    it("should resolve relative URLs against the article URL", () => {
+      const html = '<img src="../images/photo.jpg">';
+      const result = extractImagesFromHtml(html, "https://example.com/posts/1");
+      expect(result).toEqual(["https://example.com/images/photo.jpg"]);
+    });
+
     it("should return unique URLs", () => {
       const html =
         '<img src="https://example.com/same.jpg"><img src="https://example.com/same.jpg">';
@@ -121,7 +134,7 @@ describe("extract-images", () => {
         undefined,
       );
       expect(result).toHaveLength(1);
-      expect(result[0]).toContain("/api/proxy/image/");
+      expect(result[0]).toBe("https://example.com/thumb.jpg");
     });
 
     it("should extract images from content", () => {

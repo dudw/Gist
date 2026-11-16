@@ -117,14 +117,13 @@ func TestProxyHandler_ProxyImage_ErrorMapping(t *testing.T) {
 		name           string
 		err            error
 		status         int
-		cacheControl   string
 		expectedPrefix string
 	}{
 		{name: "invalid_url", err: service.ErrInvalidURL, status: http.StatusBadRequest},
 		{name: "invalid_protocol", err: service.ErrInvalidProtocol, status: http.StatusBadRequest},
 		{name: "invalid_image", err: service.ErrInvalidImage, status: http.StatusBadGateway},
 		{name: "timeout", err: service.ErrRequestTimeout, status: http.StatusGatewayTimeout},
-		{name: "upstream_rejected", err: service.ErrUpstreamRejected, status: http.StatusBadGateway, cacheControl: "no-store, no-cache, must-revalidate"},
+		{name: "upstream_rejected", err: service.ErrUpstreamRejected, status: http.StatusBadGateway},
 		{name: "default", err: errors.New("boom"), status: http.StatusInternalServerError},
 	}
 
@@ -145,9 +144,8 @@ func TestProxyHandler_ProxyImage_ErrorMapping(t *testing.T) {
 			err := h.ProxyImage(c)
 			require.NoError(t, err)
 			require.Equal(t, tc.status, rec.Code)
-			if tc.cacheControl != "" {
-				require.Equal(t, tc.cacheControl, rec.Header().Get("Cache-Control"))
-			}
+			// 任何失败都不能被缓存，否则上游恢复后仍长期显示破图
+			require.Equal(t, "no-store, no-cache, must-revalidate", rec.Header().Get("Cache-Control"))
 		})
 	}
 }

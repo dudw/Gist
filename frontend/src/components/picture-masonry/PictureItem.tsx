@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getEntryImages } from "@/lib/extract-images";
-import { getProxiedImageUrl } from "@/lib/image-proxy";
+import { toAbsoluteUrl } from "@/lib/image-url";
 import { isVideoThumbnail } from "@/lib/media-utils";
 import { formatRelativeTime } from "@/lib/date-utils";
 import { useLightboxStore } from "@/stores/lightbox-store";
@@ -89,8 +89,9 @@ export const PictureItem = memo(function PictureItem({
           style={{ aspectRatio }}
         >
           <img
-            src={getProxiedImageUrl(thumbnailUrl, entry.url ?? undefined)}
+            src={toAbsoluteUrl(thumbnailUrl, entry.url ?? undefined) ?? thumbnailUrl}
             alt={entry.title || ""}
+            referrerPolicy="no-referrer"
             className={cn(
               "size-full object-cover transition-opacity duration-300",
               imageLoaded ? "opacity-100" : "opacity-0",

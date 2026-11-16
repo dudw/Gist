@@ -18,7 +18,7 @@ import { PictureMasonry, Lightbox } from "@/components/picture-masonry";
 import { ScrollToTopZone } from "@/components/layout/ScrollToTopZone";
 import { ImagePreview } from "@/components/ui/image-preview";
 import { LoginPage, RegisterPage, NetworkErrorPage } from "@/components/auth";
-import { UpdateNotice } from "@/components/update-notice";
+import { ServiceWorkerRegistrar } from "@/components/sw-registrar";
 import { useSelection, selectionToParams } from "@/hooks/useSelection";
 import { useMarkAllAsRead, useEntry } from "@/hooks/useEntries";
 import { useMobileLayout } from "@/hooks/useMobileLayout";
@@ -556,7 +556,7 @@ function App() {
       <TooltipProvider delayDuration={300}>
         <Router>
           <AppContent />
-          <UpdateNotice />
+          <ServiceWorkerRegistrar />
         </Router>
       </TooltipProvider>
     </div>

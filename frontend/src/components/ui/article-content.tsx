@@ -6,7 +6,8 @@ import {
   useCallback,
 } from "react";
 import { parseHtml } from "@/lib/parse-html";
-import { getProxiedImageUrl } from "@/lib/image-proxy";
+import { extractImagesFromHtml } from "@/lib/extract-images";
+import { toAbsoluteUrl } from "@/lib/image-url";
 import { useImagePreviewStore } from "@/stores/image-preview-store";
 import { ArticleImage, ArticleLinkContext } from "./article-image";
 
@@ -20,23 +21,7 @@ export interface ImagePreviewContextValue {
 export const ImagePreviewContext =
   createContext<ImagePreviewContextValue | null>(null);
 
-// Extract image URLs from HTML content
-function extractImagesFromHtml(html: string, articleUrl?: string): string[] {
-  const images: string[] = [];
-  // Match img tags and extract src attribute
-  const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
-  let match;
-  while ((match = imgRegex.exec(html)) !== null) {
-    const src = match[1];
-    if (src) {
-      const proxiedSrc = getProxiedImageUrl(src, articleUrl);
-      if (!images.includes(proxiedSrc)) {
-        images.push(proxiedSrc);
-      }
-    }
-  }
-  return images;
-}
+// Extract image URLs from HTML content - delegated to the shared helper
 
 // Global cache for image elements to prevent re-creation during content updates
 // Key: articleUrl + imageSrc, Value: React element
@@ -181,13 +166,13 @@ export function ArticleContent(props: ArticleContentProps) {
 
   const openPreview = useCallback(
     (src: string) => {
-      const proxiedSrc = getProxiedImageUrl(src, articleUrl);
-      const index = images.indexOf(proxiedSrc);
+      const absoluteSrc = toAbsoluteUrl(src, articleUrl) ?? src;
+      const index = images.indexOf(absoluteSrc);
       if (index !== -1) {
         openImagePreview(images, index);
       } else {
         // Fallback: just open the single image
-        openImagePreview([proxiedSrc], 0);
+        openImagePreview([absoluteSrc], 0);
       }
     },
     [articleUrl, images, openImagePreview],

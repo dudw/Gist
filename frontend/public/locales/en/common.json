@@ -158,6 +158,8 @@
     "star": "Star",
     "unstar": "Unstar",
     "no_content": "No content available",
+    "image_load_failed": "Image failed to load",
+    "open_original_image": "Open original image",
     "loading": "Loading...",
     "untitled": "Untitled",
     "unknown_feed": "Unknown Feed",
@@ -436,9 +438,5 @@
     "cancel": "Cancel",
     "clear": "Clear search",
     "no_results": "No matching articles"
-  },
-  "update": {
-    "available": "Update Available",
-    "description": "Click to refresh and apply the update"
   }
 }

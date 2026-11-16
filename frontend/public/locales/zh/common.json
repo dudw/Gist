@@ -158,6 +158,8 @@
     "star": "加星标",
     "unstar": "取消星标",
     "no_content": "暂无内容",
+    "image_load_failed": "图片加载失败",
+    "open_original_image": "打开原图",
     "loading": "加载中...",
     "untitled": "无标题",
     "unknown_feed": "未知订阅",
@@ -436,9 +438,5 @@
     "cancel": "取消",
     "clear": "清除搜索",
     "no_results": "没有找到相关文章"
-  },
-  "update": {
-    "available": "发现新版本",
-    "description": "点击刷新以应用更新"
   }
 }

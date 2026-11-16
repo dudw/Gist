@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/date-utils";
 import { isSafeUrl, getSafeHostname } from "@/lib/url";
-import { getProxiedImageUrl } from "@/lib/image-proxy";
+import { toAbsoluteUrl } from "@/lib/image-url";
 import type { FeedPreview, Folder, ContentType } from "@/types/api";
 import type { SubscribeOptions } from "@/hooks/useAddFeed";
 
@@ -147,6 +147,10 @@ export function FeedPreviewCard({
   }, []);
 
   const displayTitle = customTitle || feed.title;
+  // 相对图标地址按站点地址还原，避免直接丢弃
+  const iconUrl = feed.imageUrl
+    ? (toAbsoluteUrl(feed.imageUrl, feed.siteUrl) ?? feed.imageUrl)
+    : null;
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm">
@@ -154,11 +158,12 @@ export function FeedPreviewCard({
       <div className="flex items-start gap-4 p-4">
         {/* Feed Icon */}
         <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-accent">
-          {feed.imageUrl && isSafeUrl(feed.imageUrl) ? (
+          {iconUrl && isSafeUrl(iconUrl) ? (
             <img
-              src={getProxiedImageUrl(feed.imageUrl, feed.siteUrl)}
+              src={iconUrl}
               alt=""
               className="size-12 rounded-lg object-cover"
+              referrerPolicy="no-referrer"
             />
           ) : (
             <svg

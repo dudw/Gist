@@ -1,11 +1,14 @@
-import { getProxiedImageUrl } from "./image-proxy";
+import { toAbsoluteUrl } from "./image-url";
 import { isSafeUrl } from "./url";
 
 /**
  * Extract image URLs from HTML content.
- * Filters out data URIs and returns unique URLs.
+ * Resolves relative addresses against the article URL and returns unique absolute URLs.
  */
-export function extractImagesFromHtml(html: string): string[] {
+export function extractImagesFromHtml(
+  html: string,
+  articleUrl?: string,
+): string[] {
   if (!html) return [];
 
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -14,12 +17,18 @@ export function extractImagesFromHtml(html: string): string[] {
   const urls = new Set<string>();
 
   for (const img of imgs) {
-    const src =
-      img.src ||
-      img.getAttribute("data-src") ||
-      img.getAttribute("data-lazy-src");
-    if (src && !src.startsWith("data:") && isSafeUrl(src)) {
-      urls.add(src);
+    // 用 getAttribute 而不是 img.src：DOMParser 会按当前页面地址解析相对路径
+    // 依次尝试常见属性，跳过 data: 占位图，取出懒加载的真实地址
+    const src = [
+      img.getAttribute("src"),
+      img.getAttribute("data-src"),
+      img.getAttribute("data-lazy-src"),
+    ].find((value) => value && !value.startsWith("data:"));
+    if (!src) continue;
+
+    const absoluteUrl = toAbsoluteUrl(src, articleUrl);
+    if (absoluteUrl && isSafeUrl(absoluteUrl)) {
+      urls.add(absoluteUrl);
     }
   }
 
@@ -28,7 +37,7 @@ export function extractImagesFromHtml(html: string): string[] {
 
 /**
  * Get all images for an entry, combining thumbnailUrl and content images.
- * All URLs are proxied through the backend to handle anti-bot protection.
+ * The browser loads these URLs directly, so they must be absolute.
  */
 export function getEntryImages(
   thumbnailUrl?: string,
@@ -39,17 +48,15 @@ export function getEntryImages(
 
   // Add thumbnail first if it exists
   if (thumbnailUrl) {
-    images.push(getProxiedImageUrl(thumbnailUrl, articleUrl));
+    images.push(toAbsoluteUrl(thumbnailUrl, articleUrl) ?? thumbnailUrl);
   }
 
   // Extract images from content
   if (content) {
-    const contentImages = extractImagesFromHtml(content);
-    for (const img of contentImages) {
-      const proxiedImg = getProxiedImageUrl(img, articleUrl);
+    for (const img of extractImagesFromHtml(content, articleUrl)) {
       // Avoid duplicates
-      if (!images.includes(proxiedImg)) {
-        images.push(proxiedImg);
+      if (!images.includes(img)) {
+        images.push(img);
       }
     }
   }

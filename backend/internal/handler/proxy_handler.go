@@ -25,6 +25,9 @@ func safeHost(rawURL string) string {
 const cacheMaxAge = 86400 // 1 day
 const svgContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; sandbox"
 
+// 失败结果绝不缓存：代理失败多为临时网络或上游拒绝，缓存后会导致修复后仍长期显示破图
+const errorCacheControl = "no-store, no-cache, must-revalidate"
+
 type ProxyHandler struct {
 	proxyService service.ProxyService
 }
@@ -93,6 +96,8 @@ func (h *ProxyHandler) ProxyImage(c echo.Context) error {
 }
 
 func (h *ProxyHandler) handleServiceError(c echo.Context, err error) error {
+	c.Response().Header().Set("Cache-Control", errorCacheControl)
+
 	switch {
 	case errors.Is(err, service.ErrInvalidURL):
 		return Error(c, http.StatusBadRequest, "Invalid URL")
@@ -103,8 +108,7 @@ func (h *ProxyHandler) handleServiceError(c echo.Context, err error) error {
 	case errors.Is(err, service.ErrInvalidImage):
 		return Error(c, http.StatusBadGateway, "Invalid image")
 	case errors.Is(err, service.ErrUpstreamRejected):
-		// Upstream rejected the request, return 502 and prevent caching
-		c.Response().Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		// Upstream rejected the request
 		return Error(c, http.StatusBadGateway, "Upstream rejected")
 	default:
 		return Error(c, http.StatusInternalServerError, "Failed to fetch image")

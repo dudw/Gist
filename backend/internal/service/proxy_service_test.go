@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -17,12 +18,51 @@ import (
 var testPNGData = []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
 
 func TestBuildReferer(t *testing.T) {
-	parsed, _ := http.NewRequest(http.MethodGet, "https://example.com/img.png", nil)
-	referer := service.BuildReferer("https://example.com/article?id=1", parsed.URL)
-	require.Equal(t, "https://example.com/", referer)
+	tests := []struct {
+		name       string
+		refererURL string
+		imageURL   string
+		expected   string
+	}{
+		{
+			name:       "same_host_keeps_full_path_and_query",
+			refererURL: "https://example.com/article?id=1",
+			imageURL:   "https://example.com/img.png",
+			expected:   "https://example.com/article?id=1",
+		},
+		{
+			name:       "same_host_drops_fragment",
+			refererURL: "https://example.com/article?id=1#section",
+			imageURL:   "https://example.com/img.png",
+			expected:   "https://example.com/article?id=1",
+		},
+		{
+			name:       "cross_host_falls_back_to_origin",
+			refererURL: "https://source.example/article?id=1",
+			imageURL:   "https://cdn.example/img.png",
+			expected:   "https://source.example/",
+		},
+		{
+			name:       "invalid_referer_uses_image_origin",
+			refererURL: "http://[::1",
+			imageURL:   "https://example.com/img.png",
+			expected:   "https://example.com/",
+		},
+		{
+			name:       "empty_referer_uses_image_origin",
+			refererURL: "",
+			imageURL:   "https://example.com/img.png",
+			expected:   "https://example.com/",
+		},
+	}
 
-	referer = service.BuildReferer("http://[::1", parsed.URL)
-	require.Equal(t, "https://example.com/", referer)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := url.Parse(tc.imageURL)
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, service.BuildReferer(tc.refererURL, parsed))
+		})
+	}
 }
 
 func TestProxyService_FetchImage_InvalidURL(t *testing.T) {

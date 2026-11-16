@@ -183,10 +183,17 @@ func isSVGDocument(data []byte) bool {
 	}
 }
 
-// buildReferer constructs the Referer header value
+// buildReferer constructs the Referer header value.
+// 同域时保留完整 URL（含路径与查询串），与浏览器默认 Referrer-Policy 行为一致，
+// 以兼容按路径校验的反盗链 CDN；跨域时降级为 origin，避免把文章查询串泄漏给第三方。
 func buildReferer(refererURL string, parsedURL *url.URL) string {
 	if refererURL != "" {
-		if parsed, err := url.Parse(refererURL); err == nil {
+		if parsed, err := url.Parse(refererURL); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+			if strings.EqualFold(parsed.Host, parsedURL.Host) {
+				referer := *parsed
+				referer.Fragment = ""
+				return referer.String()
+			}
 			return parsed.Scheme + "://" + parsed.Host + "/"
 		}
 	}

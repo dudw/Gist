@@ -10,7 +10,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: "prompt",
+      registerType: "autoUpdate",
       injectRegister: false,
       includeAssets: [
         "logo.svg",
@@ -51,6 +51,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // autoUpdate 依赖这两个开关；injectRegister: false 时插件不会自动补齐
+        skipWaiting: true,
+        clientsClaim: true,
         globPatterns: [
           "index.html",
           "manifest.webmanifest",
@@ -102,20 +105,6 @@ export default defineConfig({
               expiration: {
                 maxEntries: 500,
                 maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /\/api\/proxy\/image\/.+/,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "proxied-images-cache",
-              expiration: {
-                maxEntries: 1000,
-                maxAgeSeconds: 60 * 60 * 24 * 7,
               },
               cacheableResponse: {
                 statuses: [0, 200],
